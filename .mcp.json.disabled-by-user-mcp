@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "unity-editor-mcp": {
+      "command": "C:\\Users\\msi\\AppData\\Local\\Unity\\bin\\unity.exe",
+      "args": [
+        "mcp",
+        "--project-path",
+        "D:/rhythm-demo-main/Arknights-kiraio-dev(1)/Arknights-kiraio-dev"
+      ]
+    }
+  }
+}
