@@ -154,7 +154,7 @@ namespace Data.Player {
                     items.Remove(itemStack);
                 }
             } else {
-                throw new Exception("玩家没有该物品，扣款失败");
+                throw new Exception("You do not own that item - the charge failed.");
             }
         }
 

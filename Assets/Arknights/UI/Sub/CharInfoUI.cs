@@ -231,10 +231,10 @@ namespace UI.Sub {
                 txt_atk.text = $"{charAttribute.GetAtk():0}";
                 txt_def.text = $"{charAttribute.GetDef():0}";
                 txt_magic_resistance.text = $"{charAttribute.GetMagicResistance():0}";
-                txt_respawn_time.text = charAttribute.GetRespawnTime() > 60 ? "慢" : charAttribute.GetRespawnTime() > 40 ? "中等" : "较快";
+                txt_respawn_time.text = charAttribute.GetRespawnTime() > 60 ? "Slow" : charAttribute.GetRespawnTime() > 40 ? "Average" : "Fast";
                 txt_cost.text = $"{charAttribute.GetCost():0}";
                 txt_block.text = $"{charAttribute.GetBlock():0}";
-                txt_atk_speed.text = charAttribute.GetAtkSpeed() >= 1.6 ? "慢" : charAttribute.GetAtkSpeed() >= 1.2 ? "较慢" : charAttribute.GetAtkSpeed() >= 1 ? "中等" : charAttribute.GetAtkSpeed() >= 0.8 ? "快" : "非常快";
+                txt_atk_speed.text = charAttribute.GetAtkSpeed() >= 1.6 ? "Very Slow" : charAttribute.GetAtkSpeed() >= 1.2 ? "Slow" : charAttribute.GetAtkSpeed() >= 1 ? "Average" : charAttribute.GetAtkSpeed() >= 0.8 ? "Fast" : "Very Fast";
 
                 img_health_percentage.fillAmount = charAttribute.GetMaxHealth() / 5000;
                 img_atk_percentage.fillAmount = charAttribute.GetAtk() / 1000;

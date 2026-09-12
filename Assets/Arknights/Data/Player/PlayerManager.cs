@@ -41,7 +41,7 @@ namespace Data.Player {
 
         public void Register(string name,string password) {
             if (list.Find(data => data.name == name) != null) {
-                throw new Exception("已存在该用户");
+                throw new Exception("That username is already taken.");
             }
             PlayerData playerData = ScriptableObject.CreateInstance<PlayerData>();
             playerData.Initialization(name, password);

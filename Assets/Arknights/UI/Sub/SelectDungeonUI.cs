@@ -68,7 +68,7 @@ namespace UI.Sub {
                     if (!data) return;
                     PlayerData playerData = PlayerManager.Inst().Get();
                     if (playerData.GetReason() < data.GetReason()) {
-                        CommonDialogUI.Message(CommonDialogUI.GroundType.BLACK, "理智不足，无法进入战斗");
+                        CommonDialogUI.Message(CommonDialogUI.GroundType.BLACK, "Not enough Sanity to start this battle.");
                         return;
                     }
                     GameObject prefab = data.GetDungeonPrefab();

@@ -22,8 +22,11 @@ namespace Data.Item {
 
         public void SetAmount(int value) {
             if (amount) {
+                // 原本是"万"(一万), 英文没有这个单位, 改成按千进位的K
+                // The original abbreviated to 万 (ten thousand); English has no such unit, so this
+                // groups by thousands instead. The 10000 threshold is kept so short counts stay exact.
                 if (value >= 10000) {
-                    amount.text = $"{value / 10000f:0.#}万";
+                    amount.text = $"{value / 1000f:0.#}K";
                 } else {
                     amount.text = $"{value}";
                 }

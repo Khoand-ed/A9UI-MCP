@@ -27,7 +27,7 @@ namespace UI.Sub {
             }
             deleteButton.GetComponent<Button>().onClick.AddListener(() => {
                 if (data.GetSquad().Any(name => data.GetCharData(name) != null)) {
-                    CommonDialogUI.Message(CommonDialogUI.GroundType.WHITE, "是否确认移除当前编队中的所有干员?", () => {
+                    CommonDialogUI.Message(CommonDialogUI.GroundType.WHITE, "Remove every operator from the current squad?", () => {
                         data.ResetSquad();
                         UpdateView();
                     });

@@ -110,7 +110,7 @@ namespace UI.Sub {
                 string password = login_password.text;
                 PlayerData playerData = PlayerManager.Inst().Login(userName,password);
                 if (playerData == null) {
-                    CommonDialogUI.Message(CommonDialogUI.GroundType.BLACK, "用户名或密码错误 请重新登录");
+                    CommonDialogUI.Message(CommonDialogUI.GroundType.BLACK, "Incorrect username or password. Please try again.");
                     return;
                 }
                 // 登陆界面消失
@@ -161,22 +161,22 @@ namespace UI.Sub {
                 string rePassword = register_rePassword.text;
 
                 if (userName.Length < 3) {
-                    CommonDialogUI.Message(CommonDialogUI.GroundType.BLACK, "用户名不得小于三位");
+                    CommonDialogUI.Message(CommonDialogUI.GroundType.BLACK, "Username must be at least 3 characters.");
                     return;
                 }
 
                 if (password != rePassword) {
-                    CommonDialogUI.Message(CommonDialogUI.GroundType.BLACK, "密码不一致");
+                    CommonDialogUI.Message(CommonDialogUI.GroundType.BLACK, "Passwords do not match.");
                     return;
                 }
 
                 if (password.Length < 6 || password.Length > 18) {
-                    CommonDialogUI.Message(CommonDialogUI.GroundType.BLACK, "密码为<color=#00B0FF>6-18</color>位的数字，字母，字符(可包含!#$%&*,.:;^`~)");
+                    CommonDialogUI.Message(CommonDialogUI.GroundType.BLACK, "Password must be <color=#00B0FF>6-18</color> characters - letters, numbers or symbols (!#$%&*,.:;^`~)");
                     return;
                 }
 
                 if (!register_toggle.isOn) {
-                    CommonDialogUI.Message(CommonDialogUI.GroundType.BLACK, "需同意<color=#00B0FF>注册协议</color>和<color=#00B0FF>隐私协议</color>");
+                    CommonDialogUI.Message(CommonDialogUI.GroundType.BLACK, "You must accept the <color=#00B0FF>Registration Agreement</color> and <color=#00B0FF>Privacy Agreement</color>.");
                     return;
                 }
 
@@ -188,7 +188,7 @@ namespace UI.Sub {
                     return;
                 }
                 
-                CommonDialogUI.Message(CommonDialogUI.GroundType.WHITE, "注册成功")
+                CommonDialogUI.Message(CommonDialogUI.GroundType.WHITE, "Registration successful.")
                     .AddBackListener(() => {
                     registerPanel.DOFade(0,0.5f).OnComplete(() => {
                         registerPanel.gameObject.SetActive(false);

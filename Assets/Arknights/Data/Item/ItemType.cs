@@ -2,9 +2,9 @@
 
 namespace Data.Item {
     public enum ItemType {
-        [Description("基础物品")]
+        [Description("Basic Item")]
         JI_CHU,
-        [Description("养成材料")]
+        [Description("Upgrade Material")]
         YANG_CHENG
     }
 }

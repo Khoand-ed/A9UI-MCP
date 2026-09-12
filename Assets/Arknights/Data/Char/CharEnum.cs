@@ -2,98 +2,100 @@
 
 namespace Data.Char {
     
-    // 角色标签
+    // 角色标签 / Description 是显示给玩家的, 枚举名保持原样不动
+    // The Description strings are what the UI shows (via Expand.GetDescription), so they are in
+    // English; the pinyin enum names are left alone because saved PlayerData refers to them.
     public enum CharTag {
-        [Description("治疗")]
+        [Description("Healing")]
         ZHI_LIAO,
-        [Description("支援")]
+        [Description("Support")]
         ZHI_YUAN,
-        [Description("输出")]
+        [Description("DPS")]
         SHU_CHU,
-        [Description("群攻")]
+        [Description("AoE")]
         QUN_GONG,
-        [Description("减速")]
+        [Description("Slow")]
         JIAN_SU,
-        [Description("生存")]
+        [Description("Survival")]
         SHENG_CUN,
-        [Description("防护")]
+        [Description("Defense")]
         FAGN_HU,
-        [Description("削弱")]
+        [Description("Debuff")]
         XUE_RUO,
-        [Description("位移")]
+        [Description("Shift")]
         WEI_YI,
-        [Description("控场")]
+        [Description("Crowd Control")]
         KONG_CHANG,
-        [Description("爆发")]
+        [Description("Nuker")]
         BAO_FA,
-        [Description("召唤")]
+        [Description("Summon")]
         ZHAO_HUAN,
-        [Description("快速复活")]
+        [Description("Fast-Redeploy")]
         KUAI_SU_FU_HUO,
-        [Description("费用回复")]
+        [Description("DP-Recovery")]
         FEI_YONG_HUI_FU,
-        [Description("新手")]
+        [Description("Starter")]
         XIN_SHOU
     }
-    
+
     // 角色职业
     public enum CharProfession {
-        [Description("先锋")]
+        [Description("Vanguard")]
         XIAN_FENG,
-        [Description("近卫")]
+        [Description("Guard")]
         JIN_WEI,
-        [Description("狙击")]
+        [Description("Sniper")]
         JU_JI,
-        [Description("重装")]
+        [Description("Defender")]
         ZHONG_ZHUANG,
-        [Description("医疗")]
+        [Description("Medic")]
         YI_LIAO,
-        [Description("辅助")]
+        [Description("Supporter")]
         FU_ZHU,
-        [Description("术师")]
+        [Description("Caster")]
         SHU_SHI,
-        [Description("特种")]
+        [Description("Specialist")]
         TE_ZHONG
     }
 
     public enum CharPosition {
-        [Description("近战位")]
+        [Description("Melee")]
         JIN_ZHAN,
-        [Description("远程位")]
+        [Description("Ranged")]
         YUAN_CHENG
     }
 
     public enum CharCamp {
         NULL,
-        [Description("巴别塔")]
+        [Description("Babel")]
         BBT,
-        [Description("黑钢")]
+        [Description("Blacksteel")]
         HG,
-        [Description("卡西米尔")]
+        [Description("Kazimierz")]
         KXME,
-        [Description("罗德岛")]
+        [Description("Rhodes Island")]
         LDD,
-        [Description("龙门")]
+        [Description("Lungmen")]
         LM,
-        [Description("雷姆必拓")]
+        [Description("Rim Billiton")]
         LMBT,
-        [Description("拉特兰")]
+        [Description("Laterano")]
         LTL,
-        [Description("莱塔尼亚")]
+        [Description("Leithanien")]
         LTNY,
-        [Description("莱茵生命")]
+        [Description("Rhine Lab")]
         LYSM,
-        [Description("企鹅物流")]
+        [Description("Penguin Logistics")]
         QEWL,
-        [Description("深海猎人")]
+        [Description("Abyssal Hunters")]
         SHLR,
-        [Description("维多利亚")]
+        [Description("Victoria")]
         WDLY,
-        [Description("乌萨斯")]
+        [Description("Ursus")]
         WSS,
-        [Description("谢拉格")]
+        [Description("Kjerag")]
         XLG,
-        [Description("汐斯塔")]
+        [Description("Siesta")]
         XST
     }
 }

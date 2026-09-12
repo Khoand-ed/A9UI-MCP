@@ -72,7 +72,7 @@ namespace UI.Sub {
             
             //返回
             transform.GetComponent<Button>("BackButton").onClick.AddListener(() => {
-                CommonDialogUI.Message(CommonDialogUI.GroundType.BLACK, "确定要退出本场战斗?", () => {
+                CommonDialogUI.Message(CommonDialogUI.GroundType.BLACK, "Quit this battle?", () => {
                     UIManager.Inst().Hide("GameUI", true);
                     Delay.add(() => UIManager.Inst().Show("HomeUI"), 2);
                 });

@@ -195,7 +195,7 @@ namespace UI.Sub {
                     if (buy_amount == 0) return;
                     ui.data.AddItem(data.GetSell().GetId(), data.GetSell().GetAmount() * buy_amount);
                     ui.data.TakeItem(data.GetPrice().GetId(), all_price_amount);
-                    CommonDialogUI.Message(CommonDialogUI.GroundType.WHITE, "购买成功: " + data.GetSell().GetItemMeta().GetName() + " x " + (data.GetSell().GetAmount() * buy_amount)).AddBackListener(Hide);
+                    CommonDialogUI.Message(CommonDialogUI.GroundType.WHITE, "Purchased: " + data.GetSell().GetItemMeta().GetName() + " x " + (data.GetSell().GetAmount() * buy_amount)).AddBackListener(Hide);
                     ui.UpdateView();
                 });
             }

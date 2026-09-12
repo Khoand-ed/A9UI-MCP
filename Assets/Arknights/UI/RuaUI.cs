@@ -1,4 +1,5 @@
 ﻿using System;
+using DG.Tweening;
 using Manager;
 using Tools;
 using XLua;
@@ -65,5 +66,18 @@ namespace UI {
         public LuaTable GetScriptEnv() => scriptEnv;
         public void BaseShow() => base.Show(); // lua层无法调用被覆盖的父类方法
         public void BaseHide(bool destroy = false) => base.Hide(destroy); // lua层无法调用被覆盖的父类方法
+
+        /// <summary>
+        /// DOFade/OnComplete 是扩展方法, Lua取不到, 所以在C#这边包一层
+        /// DOFade and OnComplete are extension methods, so Lua cannot reach them - it resolves
+        /// members off the instance's own type. xLua *can* serve extension methods through
+        /// Utils.GetExtensionMethodsOf, but only while InternalGlobals.extensionMethodMap is null;
+        /// the generated register (XLuaGenAutoRegister.cs) assigns an empty map, which is non-null
+        /// and so permanently suppresses that lookup. See LuaReflectionConfig for the full write-up.
+        /// </summary>
+        public void FadeIn(float duration) => canvasGroup.DOFade(1, duration);
+
+        public void FadeOut(float duration, bool destroy = false) =>
+            canvasGroup.DOFade(0, duration).OnComplete(() => BaseHide(destroy));
     }
 }

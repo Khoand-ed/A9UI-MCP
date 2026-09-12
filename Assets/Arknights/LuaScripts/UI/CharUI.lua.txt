@@ -126,13 +126,11 @@ end
 function show()
     self:BaseShow()
     self.canvasGroup.alpha = 0
-    self.canvasGroup:DOFade(1, 0.4)
+    self:FadeIn(0.4)
 end
 
 function hide(destroy)
-    self.canvasGroup:DOFade(0, 0.4):OnComplete(function()
-        self:BaseHide(destroy)
-    end)
+    self:FadeOut(0.4, destroy)
 end
 
 function sortLevel()

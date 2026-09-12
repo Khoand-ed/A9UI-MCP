@@ -73,7 +73,7 @@ namespace UI.Sub {
             });
 
             game_exit.onClick.AddListener(() => {
-                CommonDialogUI.Message(CommonDialogUI.GroundType.WHITE,"即将返回登陆界面，是否继续？",() => {
+                CommonDialogUI.Message(CommonDialogUI.GroundType.WHITE,"You are about to return to the login screen. Continue?",() => {
                     PlayerManager.Inst().Exit();
                     UIManager.Inst().Hide("HomeUI",true);
                     UIManager.Inst().Hide("SettingUI",true);

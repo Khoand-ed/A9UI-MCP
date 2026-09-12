@@ -46,15 +46,13 @@ function show()
         SoundManager:PlayMusic(loop_clip, true);
     end)
     self.canvasGroup.alpha = 0
-    self.canvasGroup:DOFade(1, 0.5)
+    self:FadeIn(0.5)
     
     data = PlayerManager:Get()
 end
 
 function hide(destroy)
-    self.canvasGroup:DOFade(0, 0.5):OnComplete(function()
-        self:BaseHide(destroy)
-    end)
+    self:FadeOut(0.5, destroy)
 end
 
 function updateView()
