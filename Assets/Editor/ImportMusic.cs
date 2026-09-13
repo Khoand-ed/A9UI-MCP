@@ -45,6 +45,11 @@ namespace Arknights.EditorTools {
             Pick("battle", "Game", "Audio/Music/Game", "m_bat_indust");
         }
 
+        [MenuItem("Arknights/Audio/Set Shop Music...", false, 3)]
+        public static void SetShopMusic() {
+            Pick("shop", "Shop", "Audio/Music/Shop", "m_sys_shop");
+        }
+
         private static void Pick(string screen, string folder, string bundle, string prefix) {
             string source = EditorUtility.OpenFilePanel("Choose the " + screen + " screen track", "", "mp3,ogg,wav");
             if (string.IsNullOrEmpty(source)) return;

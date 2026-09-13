@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.IO;
+using Data.Item;
 using Data.Player;
 using Spine.Unity;
 using Tools;
@@ -77,6 +78,11 @@ namespace Arknights.EditorTools {
 
         private const float TileSkew = 14f;
 
+        // 商店: 白底 + 金色源石 + 黑色价格条 / store: white ground, gold originite, black price bar
+        private static readonly Color ShopGold = new Color(0.94f, 0.74f, 0.16f);
+        private static readonly Color ShopCert = new Color(0.62f, 0.66f, 0.72f);
+        private static readonly Color ShopCoin = new Color(0.85f, 0.78f, 0.42f);
+
         private const float ChamferBigCorner = 28f;
         private const float ChamferSmallCorner = 13f;
         private const float FrameGap = 5f;
@@ -87,6 +93,7 @@ namespace Arknights.EditorTools {
         private static Sprite wireSphere;
         private static Sprite skewTile;
         private static Sprite levelRing;
+        private static Sprite hexBadge;
 
         [MenuItem("Arknights/Placeholders/Generate Bootstrap Assets", false, 0)]
         public static void Generate() {
@@ -102,12 +109,14 @@ namespace Arknights.EditorTools {
             wireSphere = BuildWireSphereSprite("T_WireSphere", 512);
             skewTile = BuildSkewSprite("T_SkewTile", 128, (int)TileSkew);
             levelRing = BuildRingSprite("T_LevelRing", 256, 0.80f);
+            hexBadge = BuildHexSprite("T_HexBadge", 128);
 
             BuildCameraPrefab();
             BuildLoginUIPrefab();
             BuildCommonDialogPrefab();
             BuildHomeUIPrefab();
             BuildSettingUIPrefab();
+            BuildShopUIPrefab();
             BuildCharPrefab();
             BuildMonsterPrefab();
             BuildCharPlacePrefab();
@@ -812,6 +821,305 @@ namespace Arknights.EditorTools {
 
         private static Injection Inject(string name, Object value) {
             return new Injection { name = name, value = value };
+        }
+
+        // ------------------------------------------------------------------ ShopUI
+
+        /// <summary>
+        /// 商店(外壳) / The store, as a shell.
+        ///
+        /// ShopUI.Init() 和两个内部类全部是按路径字符串找子物体的 (Expand.GetComponent -> Find().
+        /// GetComponent), Find 找不到就直接空引用。所以下面每一个名字都是硬约定, 不能改:
+        ///   CurrencyPanel/{ZZPZ,GJPZ,CGPZ,LMB,YS}/ValueGround/txt_value
+        ///   ShopItemPanel/{ItemNameGround/Text, ItemIconGround/Image, ItemUseInfo,
+        ///                  ItemAmountGround/ItemAmount, PriceIcon, PriceAmount,
+        ///                  BuyAmountGround/Text, AllPriceIcon, AllPriceAmount,
+        ///                  CloseButton, AddButton, TakeButton, MinButton, MaxButton, BuyButton}
+        ///
+        /// Every one of those names is load-bearing: Init and the two nested classes resolve their
+        /// children by path string, and Transform.Find returning null is an immediate NRE. The buy
+        /// panel is built in full even though it is hidden, because its constructor runs from Init.
+        ///
+        /// 货架是空的: ShopManager 的字段初始化直接对 Asset.Load 的结果取 .list (ShopManager.cs:9),
+        /// 而 Data/Shop 这个包不存在, 所以只要调 ShowPriceItem 就会炸。标签页因此只做样子不接事件。
+        ///
+        /// The shelf is intentionally empty. ShopManager's field initialiser dereferences
+        /// Asset.Load(...).list with no null check (ShopManager.cs:9) and the Data/Shop bundle does
+        /// not exist, so calling ShowPriceItem throws the moment the singleton is constructed. The
+        /// tabs are therefore visual only, and the five cards on screen are static placeholders.
+        /// </summary>
+        private static void BuildShopUIPrefab() {
+            GameObject root = NewUIRoot("ShopUI");
+            ShopUI ui = root.AddComponent<ShopUI>();
+
+            Rect(root, "BackGround", Stretch).AddComponent<Image>().color =
+                new Color(0.90f, 0.90f, 0.92f);
+
+            ui.zzpz_icon = hexBadge;
+            ui.gjpz_icon = hexBadge;
+            ui.cgpz_icon = hexBadge;
+
+            // ---- 顶栏 / top bar
+            GameObject topBar = Rect(root, "TopBar", r => {
+                r.anchorMin = new Vector2(0, 1);
+                r.anchorMax = new Vector2(1, 1);
+                r.pivot = new Vector2(0.5f, 1);
+                r.sizeDelta = new Vector2(0, 120);
+            });
+            topBar.AddComponent<Image>().color = new Color(0.16f, 0.17f, 0.19f, 0.96f);
+
+            Button back = FlatBtn(topBar, "back", "‹", new Vector2(-830, 0), new Vector2(170, 68), 46, false);
+            back.GetComponent<Image>().color = new Color(0.30f, 0.31f, 0.33f, 0.95f);
+            WireHide(back, ui, "ShopUI");
+
+            // 五种货币都要建, 少一个 Init 就空引用 - 参考图只画了源石一种
+            // All five slots are mandatory; the reference only shows originite, but Init resolves
+            // every one of them and would throw on the first missing path.
+            //
+            // 必须挂在根节点下: Init 是从 UIBase.transform 开始找 "CurrencyPanel/...", 塞进 TopBar
+            // 里 Find 就返回 null
+            // It has to hang off the root. Init resolves "CurrencyPanel/..." from UIBase.transform,
+            // so nesting this inside TopBar - which is what reads naturally - makes Find return null
+            // and Init throws before the screen ever draws.
+            GameObject currency = Rect(root, "CurrencyPanel", r => {
+                r.anchorMin = r.anchorMax = new Vector2(1, 1);
+                r.pivot = new Vector2(1, 1);
+                r.sizeDelta = new Vector2(1180, 100);
+                r.anchoredPosition = new Vector2(-30, -10);
+            });
+            CurrencySlot(currency, "ZZPZ", "BASE CERT", ShopCert, -940);
+            CurrencySlot(currency, "GJPZ", "SENIOR CERT", ShopCert, -710);
+            CurrencySlot(currency, "CGPZ", "PURCHASE CERT", ShopCert, -470);
+            CurrencySlot(currency, "LMB", "LMD", ShopCoin, -230);
+            CurrencySlot(currency, "YS", "ORIGINITE", ShopGold, -20);
+
+            // ---- 三个交易所标签 / the three exchange tabs
+            GameObject tabBar = Rect(root, "TabBar", r => {
+                r.anchorMin = new Vector2(0, 1);
+                r.anchorMax = new Vector2(1, 1);
+                r.pivot = new Vector2(0.5f, 1);
+                r.sizeDelta = new Vector2(0, 84);
+                r.anchoredPosition = new Vector2(0, -120);
+            });
+            tabBar.AddComponent<Image>().color = new Color(0.27f, 0.28f, 0.30f, 0.96f);
+            ExchangeTab(tabBar, "OriginiteTab", "ORIGINITE EXCHANGE", ShopGold, -640, true);
+            ExchangeTab(tabBar, "CertificateTab", "CERTIFICATE EXCHANGE", ShopCert, 0, false);
+            ExchangeTab(tabBar, "LmdTab", "LMD EXCHANGE", ShopCoin, 640, false);
+
+            // ---- 货架 / the shelf
+            GameObject grid = Rect(root, "Grid", At(new Vector2(0, -70), new Vector2(1820, 760)));
+
+            // 模板必须是货架的子物体: ShowPriceItem 是 Instantiate(prefab, prefab.parent) 克隆的
+            // The template has to live under the shelf: ShowPriceItem clones it with
+            // Instantiate(shopItemPrefab, shopItemPrefab.parent), so its parent IS the container.
+            GameObject template = ShopCard(grid, "ShopItemTemplate", 0f, "6", "6", "Originite Cluster", "$0.99");
+            template.SetActive(false);
+            ui.shopItemPrefab = template.transform;
+
+            string[] amounts = { "6", "20", "40", "66", "130" };
+            string[] names = {
+                "Originite Cluster", "Originite Pile", "Originite Bag",
+                "Originite Case", "Originite Crate"
+            };
+            string[] prices = { "$0.99", "$4.99", "$9.99", "$19.99", "$29.99" };
+            float[] columns = { -673, -336, 0, 336, 673 };
+            for (int i = 0; i < columns.Length; i++) {
+                ShopCard(grid, "Card" + i, columns[i], amounts[i], amounts[i], names[i], prices[i]);
+            }
+
+            BuildShopItemPanel(root);
+            SavePrefab(root, "ShopUI");
+        }
+
+        /// <summary>
+        /// 顶栏一格货币 / one currency readout. 路径 ValueGround/txt_value 是 Init 写死的
+        /// The ValueGround/txt_value path is fixed by ShopUI.Init.
+        /// </summary>
+        private static void CurrencySlot(GameObject parent, string name, string caption, Color tint, float x) {
+            GameObject slot = Rect(parent, name, r => {
+                r.anchorMin = r.anchorMax = new Vector2(1, 0.5f);
+                r.pivot = new Vector2(1, 0.5f);
+                r.sizeDelta = new Vector2(210, 80);
+                r.anchoredPosition = new Vector2(x, 0);
+            });
+
+            GameObject badge = Rect(slot, "Icon", At(new Vector2(-78, 6), new Vector2(40, 40)));
+            Image badgeImage = badge.AddComponent<Image>();
+            badgeImage.sprite = hexBadge;
+            badgeImage.color = tint;
+            badgeImage.raycastTarget = false;
+
+            GameObject ground = Rect(slot, "ValueGround", At(new Vector2(28, 6), new Vector2(150, 44)));
+            ground.AddComponent<Image>().color = new Color(1f, 1f, 1f, 0.10f);
+            RowLabel(ground, "txt_value", "0", 28, Color.white, new Vector2(-8, 0), 130, TextAnchor.MiddleRight);
+
+            RowLabel(slot, "Caption", caption, 14, new Color(1f, 1f, 1f, 0.45f),
+                new Vector2(0, -28), 210, TextAnchor.MiddleCenter);
+        }
+
+        /// <summary>
+        /// 交易所标签 - 只做样子 / an exchange tab, visual only.
+        /// 接上 ShowPriceItem 就会炸, 因为 ShopManager 拿不到 Data/Shop
+        /// Wiring these to ShowPriceItem would throw: ShopManager cannot load Data/Shop.
+        /// </summary>
+        private static void ExchangeTab(GameObject parent, string name, string caption, Color tint,
+                                        float x, bool selected) {
+            GameObject tab = Rect(parent, name, At(new Vector2(x, 0), new Vector2(600, 84)));
+            Image background = tab.AddComponent<Image>();
+            background.color = selected ? new Color(0.97f, 0.97f, 0.98f, 0.98f) : new Color(1f, 1f, 1f, 0f);
+
+            GameObject badge = Rect(tab, "Icon", At(new Vector2(-195, 0), new Vector2(34, 34)));
+            Image badgeImage = badge.AddComponent<Image>();
+            badgeImage.sprite = hexBadge;
+            badgeImage.color = selected ? tint : new Color(tint.r, tint.g, tint.b, 0.5f);
+            badgeImage.raycastTarget = false;
+
+            // RowLabel 左对齐是从框的左边缘起排的, 所以要把框推到图标右边
+            // RowLabel starts its text at the box's left edge, so the box has to clear the icon.
+            RowLabel(tab, "Caption", caption, 25, selected ? TileInk : new Color(1f, 1f, 1f, 0.7f),
+                new Vector2(60, 0), 340, TextAnchor.MiddleLeft);
+        }
+
+        /// <summary>
+        /// 一张商品卡 / one product card.
+        /// 里面的 Name_Ground/Text 和 Price_Ground/Layout/{Price_Icon,Price} 是 ShopItem 写死的路径,
+        /// ItemIconComponent 还要求同一个物体上有 Button
+        /// Name_Ground/Text and Price_Ground/Layout/{Price_Icon,Price} are the paths ShopUI.ShopItem
+        /// resolves, and ItemIconComponent calls GetComponent&lt;Button&gt;() on its own object.
+        /// </summary>
+        private static GameObject ShopCard(GameObject grid, string name, float x, string amount,
+                                           string bonus, string title, string price) {
+            GameObject card = Rect(grid, name, At(new Vector2(x, 0), new Vector2(300, 727)));
+            Image cardImage = card.AddComponent<Image>();
+            cardImage.color = new Color(0.16f, 0.17f, 0.19f);
+            card.AddComponent<Button>().targetGraphic = cardImage;
+
+            // 上半截是美术位 / the upper two thirds is where the product art would sit
+            GameObject art = Rect(card, "Ground", r => {
+                r.anchorMin = new Vector2(0, 0.38f);
+                r.anchorMax = new Vector2(1, 1);
+                r.offsetMin = Vector2.zero;
+                r.offsetMax = Vector2.zero;
+            });
+            Image artImage = art.AddComponent<Image>();
+            artImage.color = new Color(0.30f, 0.31f, 0.34f);
+            artImage.raycastTarget = false;
+
+            GameObject icon = Rect(art, "Icon", At(new Vector2(0, 40), new Vector2(150, 150)));
+            Image iconImage = icon.AddComponent<Image>();
+            iconImage.sprite = hexBadge;
+            iconImage.color = ShopGold;
+            iconImage.raycastTarget = false;
+
+            // 数量行压在美术区下沿, 和参考图一样 / the quantity sits over the art, as in the reference
+            GameObject countBadge = Rect(card, "CountIcon", At(new Vector2(-70, -34), new Vector2(46, 46)));
+            Image countImage = countBadge.AddComponent<Image>();
+            countImage.sprite = hexBadge;
+            countImage.color = ShopGold;
+            countImage.raycastTarget = false;
+
+            Text amountText = RowLabel(card, "Amount", amount, 56, Color.white,
+                new Vector2(50, -34), 170, TextAnchor.MiddleLeft);
+
+            RowLabel(card, "Plus", "+", 26, new Color(1f, 1f, 1f, 0.8f), new Vector2(0, -108), 60, TextAnchor.MiddleCenter);
+
+            GameObject bonusStrip = Rect(card, "BonusStrip", At(new Vector2(0, -152), new Vector2(252, 44)));
+            bonusStrip.AddComponent<Image>().color = ShopGold;
+            RowLabel(bonusStrip, "BonusLabel", "BONUS", 18, TileInk, new Vector2(-62, 0), 120, TextAnchor.MiddleLeft);
+            RowLabel(bonusStrip, "BonusAmount", "+" + bonus, 22, TileInk, new Vector2(66, 0), 100, TextAnchor.MiddleRight);
+
+            GameObject nameGround = Rect(card, "Name_Ground", At(new Vector2(0, -215), new Vector2(300, 52)));
+            RowLabel(nameGround, "Text", title, 22, Color.white, new Vector2(14, 0), 270, TextAnchor.MiddleLeft);
+
+            GameObject priceGround = Rect(card, "Price_Ground", r => {
+                r.anchorMin = new Vector2(0, 0);
+                r.anchorMax = new Vector2(1, 0);
+                r.pivot = new Vector2(0.5f, 0);
+                r.sizeDelta = new Vector2(0, 78);
+            });
+            priceGround.AddComponent<Image>().color = new Color(0.06f, 0.06f, 0.07f);
+
+            GameObject layout = Rect(priceGround, "Layout", Stretch);
+            GameObject priceIcon = Rect(layout, "Price_Icon", At(new Vector2(-104, 0), new Vector2(36, 36)));
+            Image priceIconImage = priceIcon.AddComponent<Image>();
+            priceIconImage.sprite = hexBadge;
+            priceIconImage.color = ShopGold;
+            priceIconImage.raycastTarget = false;
+            // 外壳阶段卡片是静态的, 价格用美元直接写死; 真接上数据时 ShopItem 会覆盖这两个
+            // Static while the shelf is a shell: ShopItem overwrites this icon and text once real
+            // catalogue data drives the cards.
+            priceIcon.SetActive(false);
+            RowLabel(layout, "Price", price, 34, Color.white, new Vector2(0, 0), 280, TextAnchor.MiddleCenter);
+
+            ItemIconComponent iic = card.AddComponent<ItemIconComponent>();
+            iic.ground = artImage;
+            iic.icon = iconImage;
+            iic.amount = amountText;
+            return card;
+        }
+
+        /// <summary>
+        /// 购买弹窗 / the buy dialog. 参考图里没有, 但 Init 会构造它, 所有子物体都必须在
+        /// Not in the reference, but ShopUI.Init constructs it, so every child it resolves must exist.
+        /// </summary>
+        private static void BuildShopItemPanel(GameObject root) {
+            GameObject panel = Rect(root, "ShopItemPanel", Stretch);
+            Image blur = panel.AddComponent<Image>();
+            blur.color = new Color(0.05f, 0.05f, 0.06f, 0.65f);
+            blur.material = PlaceholderMaterial();   // ShopItemPanel 读它的 _Size / its _Size is tweened
+            panel.AddComponent<CanvasGroup>();
+
+            GameObject box = Rect(panel, "Box", At(new Vector2(0, 0), new Vector2(900, 560)));
+            box.AddComponent<Image>().color = new Color(0.94f, 0.94f, 0.96f, 0.98f);
+
+            GameObject nameGround = Rect(panel, "ItemNameGround", At(new Vector2(0, 210), new Vector2(880, 60)));
+            nameGround.AddComponent<Image>().color = new Color(0.16f, 0.17f, 0.19f);
+            RowLabel(nameGround, "Text", "Item", 30, Color.white, new Vector2(20, 0), 820, TextAnchor.MiddleLeft);
+
+            GameObject iconGround = Rect(panel, "ItemIconGround", At(new Vector2(-300, 60), new Vector2(220, 220)));
+            iconGround.AddComponent<Image>().color = new Color(0.82f, 0.83f, 0.86f);
+            GameObject iconGo = Rect(iconGround, "Image", At(Vector2.zero, new Vector2(150, 150)));
+            Image icon = iconGo.AddComponent<Image>();
+            icon.sprite = hexBadge;
+            icon.color = ShopGold;
+
+            RowLabel(panel, "ItemUseInfo", "Placeholder item description.", 20,
+                new Color(0.30f, 0.31f, 0.33f), new Vector2(140, 110), 600, TextAnchor.UpperLeft);
+
+            GameObject amountGround = Rect(panel, "ItemAmountGround", At(new Vector2(-300, -84), new Vector2(220, 48)));
+            amountGround.AddComponent<Image>().color = new Color(0.16f, 0.17f, 0.19f);
+            RowLabel(amountGround, "ItemAmount", "x 1", 24, Color.white, Vector2.zero, 220, TextAnchor.MiddleCenter);
+
+            Badge(panel, "PriceIcon", new Vector2(120, 10), ShopGold);
+            RowLabel(panel, "PriceAmount", "0", 28, TileInk, new Vector2(200, 10), 200, TextAnchor.MiddleLeft);
+
+            GameObject buyAmountGround = Rect(panel, "BuyAmountGround", At(new Vector2(190, -70), new Vector2(160, 56)));
+            buyAmountGround.AddComponent<Image>().color = new Color(0.86f, 0.87f, 0.89f);
+            RowLabel(buyAmountGround, "Text", "0", 30, TileInk, Vector2.zero, 160, TextAnchor.MiddleCenter);
+
+            Badge(panel, "AllPriceIcon", new Vector2(120, -150), ShopGold);
+            RowLabel(panel, "AllPriceAmount", "0", 28, TileInk, new Vector2(200, -150), 200, TextAnchor.MiddleLeft);
+
+            FlatBtn(panel, "TakeButton", "-", new Vector2(70, -70), new Vector2(64, 56), 30, false);
+            FlatBtn(panel, "AddButton", "+", new Vector2(310, -70), new Vector2(64, 56), 30, false);
+            FlatBtn(panel, "MinButton", "MIN", new Vector2(-10, -70), new Vector2(70, 56), 18, false);
+            FlatBtn(panel, "MaxButton", "MAX", new Vector2(390, -70), new Vector2(70, 56), 18, false);
+
+            Button buy = FlatBtn(panel, "BuyButton", "BUY", new Vector2(250, -230), new Vector2(280, 68), 26, false);
+            buy.GetComponent<Image>().color = TileBlue;
+
+            Button close = FlatBtn(panel, "CloseButton", "✕", new Vector2(420, 210), new Vector2(60, 60), 26, false);
+            close.GetComponent<Image>().color = new Color(0.30f, 0.31f, 0.33f, 0.95f);
+
+            panel.SetActive(false);
+        }
+
+        private static void Badge(GameObject parent, string name, Vector2 pos, Color tint) {
+            GameObject go = Rect(parent, name, At(pos, new Vector2(40, 40)));
+            Image image = go.AddComponent<Image>();
+            image.sprite = hexBadge;
+            image.color = tint;
+            image.raycastTarget = false;
         }
 
         // ------------------------------------------------------------------ SettingUI
@@ -1896,6 +2204,36 @@ namespace Arknights.EditorTools {
                 }
             }
             return ImportSprite(name, pixels, size, new Vector4(slant, 0, slant, 0));
+        }
+
+        /// <summary>
+        /// 画一个六边形 / a flat-top hexagon - the originite and certificate badge shape.
+        /// 用 Image.color 上色, 所以贴图本身是白的 / left white so Image.color tints it per use.
+        /// </summary>
+        private static Sprite BuildHexSprite(string name, int size) {
+            const int ss = 2;
+            int hiSize = size * ss;
+            float half = hiSize * 0.5f;
+            float radius = half * 0.98f;
+
+            Color[] pixels = new Color[size * size];
+            for (int y = 0; y < size; y++) {
+                for (int x = 0; x < size; x++) {
+                    int hits = 0;
+                    for (int dy = 0; dy < ss; dy++) {
+                        for (int dx = 0; dx < ss; dx++) {
+                            float px = Mathf.Abs(x * ss + dx + 0.5f - half);
+                            float py = Mathf.Abs(y * ss + dy + 0.5f - half);
+                            // 正六边形: |y| <= r*sqrt(3)/2 且 斜边在 r 之内
+                            // Regular hexagon: capped vertically, with the two slanted edges cutting
+                            // the corners at 60 degrees.
+                            if (py <= radius * 0.866f && px * 0.5f + py * 0.866f <= radius * 0.866f) hits++;
+                        }
+                    }
+                    pixels[y * size + x] = new Color(1f, 1f, 1f, (float)hits / (ss * ss));
+                }
+            }
+            return ImportSprite(name, pixels, size, Vector4.zero);
         }
 
         /// <summary>
