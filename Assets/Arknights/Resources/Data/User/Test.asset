@@ -36,4 +36,10 @@ MonoBehaviour:
     amount: 500
   - id: 2
     amount: 1000
+  - id: 6
+    amount: 400
+  - id: 7
+    amount: 200
+  - id: 8
+    amount: 20
   permissions: []

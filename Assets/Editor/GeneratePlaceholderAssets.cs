@@ -3,6 +3,7 @@ using System.IO;
 using Data.Char;
 using Data.Item;
 using Data.Player;
+using Manager;
 using Spine.Unity;
 using Tools;
 using UI;
@@ -117,6 +118,8 @@ namespace Arknights.EditorTools {
             BuildCommonDialogPrefab();
             BuildHomeUIPrefab();
             BuildSettingUIPrefab();
+            BuildItemAssets();
+            BuildShopCatalogue();
             BuildShopUIPrefab();
             BuildCharSprites();
             BuildCharMeta("AMIYA", "Amiya", "阿米娅", 5, CharProfession.SHU_SHI);
@@ -966,7 +969,7 @@ namespace Arknights.EditorTools {
             PolygonSprite(SpriteCharDir + "/ProfessionSmall", profession.ToString(), 48, sides, rotation);
         }
 
-        private static void PolygonSprite(string dir, string name, int size, int sides, float rotation) {
+        private static Sprite PolygonSprite(string dir, string name, int size, int sides, float rotation) {
             Color[] pixels = new Color[size * size];
             float half = size * 0.5f;
             float radius = half * 0.88f;
@@ -985,7 +988,7 @@ namespace Arknights.EditorTools {
                     if (offset.magnitude <= edge) pixels[y * size + x] = Color.white;
                 }
             }
-            ImportSpriteAt(dir, name, pixels, size, size, Vector4.zero);
+            return ImportSpriteAt(dir, name, pixels, size, size, Vector4.zero);
         }
 
         private static void EliteBadge(string name, int level) {
@@ -1596,6 +1599,110 @@ namespace Arknights.EditorTools {
             image.raycastTarget = false;
         }
 
+        // ------------------------------------------------------------------ Item + shop catalogue
+
+        private const string MetaItemDir = ResourcesRoot + "/Meta/Item";
+        private const string SpriteItemDir = ResourcesRoot + "/Sprite/Item";
+        private const string ShopDataDir = ResourcesRoot + "/Data/Shop";
+
+        /// <summary>
+        /// 凭证交易所的货架 / the certificate exchange catalogue.
+        /// 价格一律是6号(资质凭证), 对应侧边栏第一个分区; ShowPriceItem 就是按这个id筛的
+        /// Everything is priced in item 6, the base certificate, which is what the sidebar's first
+        /// zone selects - ShowPriceItem filters the list by exactly that price id.
+        ///
+        /// 卖的东西沿用已有的物品id: 1=合成玉 2=龙门币 (PlayerData.Initialization 就是这么发的),
+        /// 其余是新编的
+        /// The goods reuse the ids PlayerData already hands out - 1 is Orundum and 2 is LMD - with
+        /// new ids only for things that did not exist yet.
+        /// </summary>
+        private static readonly int[,] ShopCatalogue = {
+            // sellId, sellAmount, priceAmount
+            { 10, 1,    240 },  // Headhunting Permit
+            { 2,  4000, 10  },  // LMD
+            { 11, 1,    10  },  // Basic Battle Record
+            { 1,  100,  40  },  // Orundum
+            { 12, 1,    8   },  // Recruitment Permit
+            { 13, 1,    12  },  // Skill Summary Vol.1
+        };
+
+        private static void BuildItemAssets() {
+            // ItemManager 构造时按 item_ground_{稀有度} 建字典, 名字不对就进不去
+            // ItemManager keys these by the digits after "item_ground_", so the names are fixed.
+            for (int rarity = 1; rarity <= 6; rarity++) {
+                Color tint = RarityColors[rarity - 1];
+                Color[] pixels = new Color[64 * 64];
+                for (int y = 0; y < 64; y++) {
+                    for (int x = 0; x < 64; x++) {
+                        float t = y / 63f;
+                        Color row = Color.Lerp(tint * 0.35f, tint, t);
+                        pixels[y * 64 + x] = new Color(row.r, row.g, row.b, 1f);
+                    }
+                }
+                ImportSpriteAt(SpriteItemDir + "/ItemGround", "item_ground_" + rarity, pixels, 64, 64, Vector4.zero);
+            }
+
+            BuildItemMeta(1, "Orundum", 4, "Synthetic material. Commonly spent on recruiting operators.");
+            BuildItemMeta(2, "LMD", 4, "The standard currency of Lungmen.");
+            BuildItemMeta(10, "Headhunting Permit", 5, "Permits a single headhunting attempt.");
+            BuildItemMeta(11, "Basic Battle Record", 3, "Grants a small amount of operator experience.");
+            BuildItemMeta(12, "Recruitment Permit", 4, "Permits one recruitment listing.");
+            BuildItemMeta(13, "Skill Summary Vol.1", 3, "Used to raise an operator's skill level.");
+        }
+
+        private static void BuildItemMeta(int id, string name, int rarity, string useInfo) {
+            EnsureFolder(MetaItemDir);
+
+            // 每个物品给一个能分辨的多边形当图标 / a distinguishable polygon per item as its icon
+            Sprite icon = PolygonSprite(SpriteItemDir + "/Icon", "item_" + id, 96, 3 + id % 5, id * 13f);
+
+            ItemMeta meta = ScriptableObject.CreateInstance<ItemMeta>();
+            SerializedObject so = new SerializedObject(meta);
+            so.FindProperty("id").intValue = id;
+            so.FindProperty("name").stringValue = name;
+            so.FindProperty("rarity").intValue = rarity;
+            so.FindProperty("useInfo").stringValue = useInfo;
+            so.FindProperty("description").stringValue = useInfo;
+            so.FindProperty("waysObtain").stringValue = "Certificate Exchange";
+            so.FindProperty("icon").objectReferenceValue = icon;
+            so.ApplyModifiedPropertiesWithoutUndo();
+
+            // ItemManager 用 id.ToString() 当资源名 / ItemManager loads these by id.ToString()
+            string path = MetaItemDir + "/" + id + ".asset";
+            AssetDatabase.DeleteAsset(path);
+            AssetDatabase.CreateAsset(meta, path);
+        }
+
+        /// <summary>
+        /// ShopManager 的字段初始化直接对 Asset.Load 的结果取 .list (ShopManager.cs:9), 没有这个资源
+        /// 就是空引用 - 所以哪怕货架是空的, 这个列表也必须存在
+        /// ShopManager's field initialiser dereferences Asset.Load(...).list with no null check, so
+        /// this asset has to exist before anything touches that singleton.
+        /// </summary>
+        private static void BuildShopCatalogue() {
+            EnsureFolder(ShopDataDir);
+
+            ShopItemDataList list = ScriptableObject.CreateInstance<ShopItemDataList>();
+            SerializedObject so = new SerializedObject(list);
+            SerializedProperty entries = so.FindProperty("list");
+            entries.arraySize = ShopCatalogue.GetLength(0);
+
+            for (int i = 0; i < ShopCatalogue.GetLength(0); i++) {
+                SerializedProperty entry = entries.GetArrayElementAtIndex(i);
+                SerializedProperty sell = entry.FindPropertyRelative("sellItem");
+                SerializedProperty price = entry.FindPropertyRelative("priceItem");
+                sell.FindPropertyRelative("id").intValue = ShopCatalogue[i, 0];
+                sell.FindPropertyRelative("amount").intValue = ShopCatalogue[i, 1];
+                price.FindPropertyRelative("id").intValue = 6;
+                price.FindPropertyRelative("amount").intValue = ShopCatalogue[i, 2];
+            }
+            so.ApplyModifiedPropertiesWithoutUndo();
+
+            string path = ShopDataDir + "/ShopItemDataList.asset";
+            AssetDatabase.DeleteAsset(path);
+            AssetDatabase.CreateAsset(list, path);
+        }
+
         // ------------------------------------------------------------------ ShopUI
 
         /// <summary>
@@ -1666,6 +1773,11 @@ namespace Arknights.EditorTools {
             CurrencySlot(currency, "LMB", "LMD", ShopCoin, -230);
             CurrencySlot(currency, "YS", "ORIGINITE", ShopGold, -20);
 
+            // ---- 三页内容, 标签切换 / three pages, switched by the tabs
+            GameObject originitePage = Rect(root, "OriginitePage", Stretch);
+            GameObject certificatePage = Rect(root, "CertificatePage", Stretch);
+            GameObject lmdPage = Rect(root, "LmdPage", Stretch);
+
             // ---- 三个交易所标签 / the three exchange tabs
             GameObject tabBar = Rect(root, "TabBar", r => {
                 r.anchorMin = new Vector2(0, 1);
@@ -1675,20 +1787,19 @@ namespace Arknights.EditorTools {
                 r.anchoredPosition = new Vector2(0, -120);
             });
             tabBar.AddComponent<Image>().color = new Color(0.27f, 0.28f, 0.30f, 0.96f);
-            ExchangeTab(tabBar, "OriginiteTab", "ORIGINITE EXCHANGE", ShopGold, -640, true);
-            ExchangeTab(tabBar, "CertificateTab", "CERTIFICATE EXCHANGE", ShopCert, 0, false);
-            ExchangeTab(tabBar, "LmdTab", "LMD EXCHANGE", ShopCoin, 640, false);
+            ToggleGroup tabs = tabBar.AddComponent<ToggleGroup>();
+            ExchangeTab(tabBar, "OriginiteTab", "ORIGINITE EXCHANGE", ShopGold, -640, true,
+                tabs, originitePage, ui, -1);
+            // 凭证页切过去时顺手拉一次货架: 用Int持久监听, 它带的是固定参数, 会忽略Toggle传的bool
+            // Selecting the certificate tab also fills the shelf. An Int persistent listener carries
+            // a fixed argument and ignores the bool the Toggle passes, which is what lets a
+            // UnityEvent<bool> drive ShowPriceItem(int) with no glue code.
+            ExchangeTab(tabBar, "CertificateTab", "CERTIFICATE EXCHANGE", ShopCert, 0, false,
+                tabs, certificatePage, ui, 6);
+            ExchangeTab(tabBar, "LmdTab", "LMD EXCHANGE", ShopCoin, 640, false,
+                tabs, lmdPage, ui, -1);
 
-            // ---- 货架 / the shelf
-            GameObject grid = Rect(root, "Grid", At(new Vector2(0, -70), new Vector2(1820, 760)));
-
-            // 模板必须是货架的子物体: ShowPriceItem 是 Instantiate(prefab, prefab.parent) 克隆的
-            // The template has to live under the shelf: ShowPriceItem clones it with
-            // Instantiate(shopItemPrefab, shopItemPrefab.parent), so its parent IS the container.
-            GameObject template = ShopCard(grid, "ShopItemTemplate", 0f, "6", "6", "Originite Cluster", "$0.99");
-            template.SetActive(false);
-            ui.shopItemPrefab = template.transform;
-
+            // ---- 源石页: 还是那五张美元卡, 静态的 / originite page keeps the static USD cards
             string[] amounts = { "6", "20", "40", "66", "130" };
             string[] names = {
                 "Originite Cluster", "Originite Pile", "Originite Bag",
@@ -1696,9 +1807,65 @@ namespace Arknights.EditorTools {
             };
             string[] prices = { "$0.99", "$4.99", "$9.99", "$19.99", "$29.99" };
             float[] columns = { -673, -336, 0, 336, 673 };
+            GameObject usdGrid = Rect(originitePage, "Grid", At(new Vector2(0, -70), new Vector2(1820, 760)));
             for (int i = 0; i < columns.Length; i++) {
-                ShopCard(grid, "Card" + i, columns[i], amounts[i], amounts[i], names[i], prices[i]);
+                ShopCard(usdGrid, "Card" + i, columns[i], amounts[i], amounts[i], names[i], prices[i]);
             }
+
+            // ---- 凭证页: 左侧分区 + 可横向滚动的货架 / sidebar plus a horizontally scrolling shelf
+            CertificateZone(certificatePage, "BaseZone", "BASE CERTIFICATE", ShopCert, 250, ui, 6);
+            CertificateZone(certificatePage, "SeniorZone", "SENIOR CERTIFICATE", ShopGold, 100, ui, 7);
+            CertificateZone(certificatePage, "PurchaseZone", "PURCHASE CERTIFICATE", Hostile, -50, ui, 8);
+
+            GameObject scrollView = Rect(certificatePage, "ShelfScroll", r => {
+                r.anchorMin = new Vector2(0, 0);
+                r.anchorMax = new Vector2(1, 1);
+                r.offsetMin = new Vector2(420, 60);
+                r.offsetMax = new Vector2(-40, -220);
+            });
+            ScrollRect scroll = scrollView.AddComponent<ScrollRect>();
+
+            GameObject viewport = Rect(scrollView, "Viewport", Stretch);
+            viewport.AddComponent<Image>().color = new Color(1f, 1f, 1f, 0.02f);
+            viewport.AddComponent<Mask>().showMaskGraphic = true;
+
+            GameObject content = Rect(viewport, "Content", r => {
+                r.anchorMin = new Vector2(0, 1);
+                r.anchorMax = new Vector2(0, 1);
+                r.pivot = new Vector2(0, 1);
+                r.sizeDelta = new Vector2(0, 700);
+            });
+            GridLayoutGroup shelf = content.AddComponent<GridLayoutGroup>();
+            shelf.cellSize = new Vector2(300, 330);
+            shelf.spacing = new Vector2(20, 20);
+            shelf.constraint = GridLayoutGroup.Constraint.FixedRowCount;
+            shelf.constraintCount = 2;
+            shelf.startAxis = GridLayoutGroup.Axis.Vertical;
+            shelf.childAlignment = TextAnchor.UpperLeft;
+
+            ContentSizeFitter shelfFitter = content.AddComponent<ContentSizeFitter>();
+            shelfFitter.horizontalFit = ContentSizeFitter.FitMode.PreferredSize;
+            shelfFitter.verticalFit = ContentSizeFitter.FitMode.Unconstrained;
+
+            scroll.content = (RectTransform)content.transform;
+            scroll.viewport = (RectTransform)viewport.transform;
+            scroll.horizontal = true;
+            scroll.vertical = false;
+            scroll.movementType = ScrollRect.MovementType.Elastic;
+
+            // 模板必须在滚动内容里: ShowPriceItem 是 Instantiate(prefab, prefab.parent) 克隆的
+            // The template lives inside Content because ShowPriceItem clones with
+            // Instantiate(shopItemPrefab, shopItemPrefab.parent) - that parent IS the container.
+            GameObject template = CatalogueCard(content, "ShopItemTemplate");
+            template.SetActive(false);
+            ui.shopItemPrefab = template.transform;
+
+            // ---- 龙门页: 参考图第四张就是这个状态 / the fourth reference is exactly this state
+            RowLabel(lmdPage, "NotOpen", "NOT YET AVAILABLE", 72, new Color(0.42f, 0.43f, 0.45f),
+                new Vector2(0, -60), 1400, TextAnchor.MiddleCenter);
+
+            certificatePage.SetActive(false);
+            lmdPage.SetActive(false);
 
             BuildShopItemPanel(root);
             SavePrefab(root, "ShopUI");
@@ -1731,15 +1898,47 @@ namespace Arknights.EditorTools {
         }
 
         /// <summary>
-        /// 交易所标签 - 只做样子 / an exchange tab, visual only.
-        /// 接上 ShowPriceItem 就会炸, 因为 ShopManager 拿不到 Data/Shop
-        /// Wiring these to ShowPriceItem would throw: ShopManager cannot load Data/Shop.
+        /// 交易所标签 / an exchange tab.
+        /// priceId 大于0时, 选中这一页会顺带调 ShowPriceItem 把货架填上
+        /// When priceId is positive, selecting the tab also calls ShowPriceItem to fill the shelf.
         /// </summary>
         private static void ExchangeTab(GameObject parent, string name, string caption, Color tint,
-                                        float x, bool selected) {
+                                        float x, bool selected, ToggleGroup group, GameObject page,
+                                        ShopUI ui, int priceId) {
             GameObject tab = Rect(parent, name, At(new Vector2(x, 0), new Vector2(600, 84)));
+            Toggle toggle = tab.AddComponent<Toggle>();
             Image background = tab.AddComponent<Image>();
-            background.color = selected ? new Color(0.97f, 0.97f, 0.98f, 0.98f) : new Color(1f, 1f, 1f, 0f);
+            background.color = new Color(1f, 1f, 1f, 0f);
+
+            // 选中态用中灰而不是参考图的白底:
+            // 白底就得配深色字, 但没选中时背景是深色条, 深色字又看不见; 而Toggle只淡入淡出graphic
+            // 自己, 塞进它里面的文字不会跟着隐藏(和滑动开关踩的是同一个坑)。中灰两种状态下白字都清楚。
+            // Mid grey rather than the reference's white: white would need dark type, which then
+            // vanishes against the dark bar when unselected - and a caption nested inside `graphic`
+            // would not hide with it, since Toggle cross-fades only that one Graphic. This is the
+            // same trap the sliding switch hit. Mid grey keeps white type legible in both states.
+            GameObject selectedGo = Rect(tab, "Selected", Stretch);
+            Image selectedImage = selectedGo.AddComponent<Image>();
+            selectedImage.color = new Color(0.40f, 0.41f, 0.44f, 0.98f);
+
+            GameObject accent = Rect(selectedGo, "Accent", r => {
+                r.anchorMin = new Vector2(0, 1);
+                r.anchorMax = new Vector2(1, 1);
+                r.pivot = new Vector2(0.5f, 1);
+                r.sizeDelta = new Vector2(0, 6);
+            });
+            Image accentImage = accent.AddComponent<Image>();
+            accentImage.color = tint;
+            accentImage.raycastTarget = false;
+
+            toggle.targetGraphic = background;
+            toggle.graphic = selectedImage;
+            toggle.group = group;
+            toggle.isOn = selected;
+            UnityEventTools.AddPersistentListener(toggle.onValueChanged, page.SetActive);
+            if (priceId > 0) {
+                UnityEventTools.AddIntPersistentListener(toggle.onValueChanged, ui.ShowPriceItem, priceId);
+            }
 
             GameObject badge = Rect(tab, "Icon", At(new Vector2(-195, 0), new Vector2(34, 34)));
             Image badgeImage = badge.AddComponent<Image>();
@@ -1749,8 +1948,113 @@ namespace Arknights.EditorTools {
 
             // RowLabel 左对齐是从框的左边缘起排的, 所以要把框推到图标右边
             // RowLabel starts its text at the box's left edge, so the box has to clear the icon.
-            RowLabel(tab, "Caption", caption, 25, selected ? TileInk : new Color(1f, 1f, 1f, 0.7f),
-                new Vector2(60, 0), 340, TextAnchor.MiddleLeft);
+            RowLabel(tab, "Caption", caption, 25, Color.white, new Vector2(60, 0), 340, TextAnchor.MiddleLeft);
+        }
+
+        /// <summary>
+        /// 左侧的凭证分区 / one certificate zone in the left sidebar.
+        /// 点一下就把货架换成这个凭证能买的东西 / clicking swaps the shelf to that certificate's goods
+        /// </summary>
+        private static void CertificateZone(GameObject parent, string name, string caption, Color tint,
+                                            float y, ShopUI ui, int priceId) {
+            GameObject zone = Rect(parent, name, r => {
+                r.anchorMin = r.anchorMax = new Vector2(0, 0.5f);
+                r.pivot = new Vector2(0, 0.5f);
+                r.sizeDelta = new Vector2(340, 140);
+                r.anchoredPosition = new Vector2(30, y);
+            });
+            Image background = zone.AddComponent<Image>();
+            background.color = new Color(0.22f, 0.23f, 0.25f, 0.96f);
+            Button button = zone.AddComponent<Button>();
+            button.targetGraphic = background;
+
+            GameObject stripe = Rect(zone, "Stripe", r => {
+                r.anchorMin = new Vector2(0, 0);
+                r.anchorMax = new Vector2(0, 1);
+                r.pivot = new Vector2(0, 0.5f);
+                r.sizeDelta = new Vector2(10, 0);
+            });
+            Image stripeImage = stripe.AddComponent<Image>();
+            stripeImage.color = tint;
+            stripeImage.raycastTarget = false;
+
+            GameObject badge = Rect(zone, "Icon", At(new Vector2(-110, 0), new Vector2(52, 52)));
+            Image badgeImage = badge.AddComponent<Image>();
+            badgeImage.sprite = hexBadge;
+            badgeImage.color = tint;
+            badgeImage.raycastTarget = false;
+
+            RowLabel(zone, "Caption", caption, 21, Color.white, new Vector2(40, 0), 230, TextAnchor.MiddleLeft);
+
+            // 固定参数的Int持久监听, 存得进预制体 / an Int persistent listener, which serialises
+            UnityEventTools.AddIntPersistentListener(button.onClick, ui.ShowPriceItem, priceId);
+        }
+
+        /// <summary>
+        /// 凭证货架上的一张卡 / one card on the certificate shelf.
+        /// 名字/价格图标/价格三条路径是 ShopUI.ShopItem 写死的, ItemIconComponent 还要求同物体上有Button
+        /// Name_Ground/Text and Price_Ground/Layout/{Price_Icon,Price} are the paths ShopUI.ShopItem
+        /// resolves, and ItemIconComponent calls GetComponent&lt;Button&gt;() on its own object.
+        /// </summary>
+        private static GameObject CatalogueCard(GameObject parent, string name) {
+            GameObject card = Rect(parent, name, r => { });
+            Image cardImage = card.AddComponent<Image>();
+            cardImage.color = new Color(0.96f, 0.96f, 0.97f, 0.98f);
+            card.AddComponent<Button>().targetGraphic = cardImage;
+
+            // 顶上的黑色标题条 / the dark title bar across the top
+            GameObject nameGround = Rect(card, "Name_Ground", r => {
+                r.anchorMin = new Vector2(0, 1);
+                r.anchorMax = new Vector2(1, 1);
+                r.pivot = new Vector2(0.5f, 1);
+                r.sizeDelta = new Vector2(0, 56);
+            });
+            nameGround.AddComponent<Image>().color = new Color(0.13f, 0.14f, 0.16f);
+            RowLabel(nameGround, "Text", "Item", 24, Color.white, Vector2.zero, 290, TextAnchor.MiddleCenter);
+
+            // 稀有度底图 + 图标 + 数量, 三个都是 ItemIconComponent 的字段
+            // Rarity ground, icon and amount are the three fields ItemIconComponent drives.
+            GameObject ground = Rect(card, "Ground", At(new Vector2(0, 14), new Vector2(170, 170)));
+            Image groundImage = ground.AddComponent<Image>();
+            groundImage.color = Color.white;
+            groundImage.raycastTarget = false;
+
+            GameObject icon = Rect(ground, "Icon", At(Vector2.zero, new Vector2(120, 120)));
+            Image iconImage = icon.AddComponent<Image>();
+            iconImage.color = Color.white;
+            iconImage.raycastTarget = false;
+
+            // 数量压在稀有度底图右下角, 底下垫一条暗色: 四位数直接盖在彩色底图上读不出来
+            // The count sits bottom-right over the rarity ground with a dark strip behind it - a
+            // four-digit amount straight on the coloured ground is unreadable.
+            GameObject amountHolder = Rect(card, "AmountGround", At(new Vector2(43, -54), new Vector2(160, 38)));
+            amountHolder.AddComponent<Image>().color = new Color(0.08f, 0.08f, 0.10f, 0.72f);
+            Text amount = RowLabel(amountHolder, "Amount", "1", 24, Color.white,
+                new Vector2(-10, 0), 150, TextAnchor.MiddleRight);
+
+            // 底部灰色价格条 / the grey price bar along the bottom
+            GameObject priceGround = Rect(card, "Price_Ground", r => {
+                r.anchorMin = new Vector2(0, 0);
+                r.anchorMax = new Vector2(1, 0);
+                r.pivot = new Vector2(0.5f, 0);
+                r.sizeDelta = new Vector2(-24, 52);
+                r.anchoredPosition = new Vector2(0, 14);
+            });
+            priceGround.AddComponent<Image>().color = new Color(0.62f, 0.63f, 0.65f, 0.95f);
+
+            GameObject layout = Rect(priceGround, "Layout", Stretch);
+            GameObject priceIcon = Rect(layout, "Price_Icon", At(new Vector2(-72, 0), new Vector2(34, 34)));
+            Image priceIconImage = priceIcon.AddComponent<Image>();
+            priceIconImage.sprite = hexBadge;
+            priceIconImage.color = ShopCert;
+            priceIconImage.raycastTarget = false;
+            RowLabel(layout, "Price", "0", 26, TileInk, new Vector2(20, 0), 160, TextAnchor.MiddleLeft);
+
+            ItemIconComponent iic = card.AddComponent<ItemIconComponent>();
+            iic.ground = groundImage;
+            iic.icon = iconImage;
+            iic.amount = amount;
+            return card;
         }
 
         /// <summary>
@@ -1842,46 +2146,69 @@ namespace Arknights.EditorTools {
             blur.material = PlaceholderMaterial();   // ShopItemPanel 读它的 _Size / its _Size is tweened
             panel.AddComponent<CanvasGroup>();
 
-            GameObject box = Rect(panel, "Box", At(new Vector2(0, 0), new Vector2(900, 560)));
-            box.AddComponent<Image>().color = new Color(0.94f, 0.94f, 0.96f, 0.98f);
+            // 参考图是左右两栏: 左边白底放图和描述, 右边深色放价格和数量
+            // Two columns, as the reference draws it: a pale panel on the left carrying the art and
+            // description, a dark one on the right carrying price, quantity and the buy button.
+            // 两块底板必须完全不透明: 线性空间里98%还是能透出底下亮色的货架卡
+            // Both plates are fully opaque. In Linear colour space even 2% of the bright shelf
+            // underneath reads clearly through a dark panel - the same trap the login blackout hit.
+            GameObject left = Rect(panel, "Box", At(new Vector2(-280, 0), new Vector2(580, 620)));
+            left.AddComponent<Image>().color = new Color(0.95f, 0.95f, 0.96f, 1f);
 
-            GameObject nameGround = Rect(panel, "ItemNameGround", At(new Vector2(0, 210), new Vector2(880, 60)));
+            GameObject right = Rect(panel, "BuyBox", At(new Vector2(290, 0), new Vector2(560, 620)));
+            right.AddComponent<Image>().color = new Color(0.20f, 0.21f, 0.23f, 1f);
+
+            GameObject nameGround = Rect(panel, "ItemNameGround", At(new Vector2(-440, 250), new Vector2(240, 56)));
             nameGround.AddComponent<Image>().color = new Color(0.16f, 0.17f, 0.19f);
-            RowLabel(nameGround, "Text", "Item", 30, Color.white, new Vector2(20, 0), 820, TextAnchor.MiddleLeft);
+            RowLabel(nameGround, "Text", "Item", 26, Color.white, Vector2.zero, 230, TextAnchor.MiddleCenter);
 
-            GameObject iconGround = Rect(panel, "ItemIconGround", At(new Vector2(-300, 60), new Vector2(220, 220)));
-            iconGround.AddComponent<Image>().color = new Color(0.82f, 0.83f, 0.86f);
-            GameObject iconGo = Rect(iconGround, "Image", At(Vector2.zero, new Vector2(150, 150)));
+            GameObject iconGround = Rect(panel, "ItemIconGround", At(new Vector2(-280, 60), new Vector2(500, 300)));
+            iconGround.AddComponent<Image>().color = new Color(0.86f, 0.87f, 0.89f);
+            GameObject iconGo = Rect(iconGround, "Image", At(Vector2.zero, new Vector2(200, 200)));
             Image icon = iconGo.AddComponent<Image>();
             icon.sprite = hexBadge;
             icon.color = ShopGold;
 
-            RowLabel(panel, "ItemUseInfo", "Placeholder item description.", 20,
-                new Color(0.30f, 0.31f, 0.33f), new Vector2(140, 110), 600, TextAnchor.UpperLeft);
+            Text useInfo = RowLabel(panel, "ItemUseInfo", "Placeholder item description.", 22,
+                new Color(0.30f, 0.31f, 0.33f), new Vector2(-280, -140), 500, TextAnchor.UpperLeft);
+            ((RectTransform)useInfo.transform).sizeDelta = new Vector2(500, 90);
 
-            GameObject amountGround = Rect(panel, "ItemAmountGround", At(new Vector2(-300, -84), new Vector2(220, 48)));
-            amountGround.AddComponent<Image>().color = new Color(0.16f, 0.17f, 0.19f);
-            RowLabel(amountGround, "ItemAmount", "x 1", 24, Color.white, Vector2.zero, 220, TextAnchor.MiddleCenter);
+            // 售价 / unit price
+            // 小标题往右让开两块底板的接缝: 左板到+10为止, 贴着缝排第一个字会被压掉
+            // The captions clear the seam between the two plates. The left one ends at +10, and a
+            // left-aligned label starting exactly there loses its first glyph against the edge.
+            RowLabel(panel, "PriceCaption", "PRICE", 20, new Color(1f, 1f, 1f, 0.5f),
+                new Vector2(140, 240), 160, TextAnchor.MiddleLeft);
+            Badge(panel, "PriceIcon", new Vector2(300, 240), ShopCert);
+            RowLabel(panel, "PriceAmount", "0", 30, Color.white, new Vector2(400, 240), 180, TextAnchor.MiddleLeft);
 
-            Badge(panel, "PriceIcon", new Vector2(120, 10), ShopGold);
-            RowLabel(panel, "PriceAmount", "0", 28, TileInk, new Vector2(200, 10), 200, TextAnchor.MiddleLeft);
+            // 商品数量 / how much the entry grants
+            GameObject amountGround = Rect(panel, "ItemAmountGround", At(new Vector2(140, 140), new Vector2(200, 44)));
+            amountGround.AddComponent<Image>().color = new Color(1f, 1f, 1f, 0.14f);
+            RowLabel(amountGround, "ItemAmount", "x 1", 22, Color.white, Vector2.zero, 200, TextAnchor.MiddleCenter);
 
-            GameObject buyAmountGround = Rect(panel, "BuyAmountGround", At(new Vector2(190, -70), new Vector2(160, 56)));
-            buyAmountGround.AddComponent<Image>().color = new Color(0.86f, 0.87f, 0.89f);
-            RowLabel(buyAmountGround, "Text", "0", 30, TileInk, Vector2.zero, 160, TextAnchor.MiddleCenter);
+            RowLabel(panel, "BuyCaption", "QUANTITY", 20, new Color(1f, 1f, 1f, 0.5f),
+                new Vector2(160, 50), 200, TextAnchor.MiddleLeft);
 
-            Badge(panel, "AllPriceIcon", new Vector2(120, -150), ShopGold);
-            RowLabel(panel, "AllPriceAmount", "0", 28, TileInk, new Vector2(200, -150), 200, TextAnchor.MiddleLeft);
+            FlatBtn(panel, "MinButton", "MIN", new Vector2(80, -20), new Vector2(90, 60), 18, false);
+            FlatBtn(panel, "TakeButton", "-", new Vector2(178, -20), new Vector2(60, 60), 30, false);
+            GameObject buyAmountGround = Rect(panel, "BuyAmountGround", At(new Vector2(290, -20), new Vector2(140, 60)));
+            buyAmountGround.AddComponent<Image>().color = new Color(0.88f, 0.89f, 0.91f);
+            RowLabel(buyAmountGround, "Text", "0", 30, TileInk, Vector2.zero, 140, TextAnchor.MiddleCenter);
+            FlatBtn(panel, "AddButton", "+", new Vector2(402, -20), new Vector2(60, 60), 30, false);
+            FlatBtn(panel, "MaxButton", "MAX", new Vector2(500, -20), new Vector2(90, 60), 18, false);
 
-            FlatBtn(panel, "TakeButton", "-", new Vector2(70, -70), new Vector2(64, 56), 30, false);
-            FlatBtn(panel, "AddButton", "+", new Vector2(310, -70), new Vector2(64, 56), 30, false);
-            FlatBtn(panel, "MinButton", "MIN", new Vector2(-10, -70), new Vector2(70, 56), 18, false);
-            FlatBtn(panel, "MaxButton", "MAX", new Vector2(390, -70), new Vector2(70, 56), 18, false);
+            // 总计支付 / total
+            RowLabel(panel, "TotalCaption", "TOTAL", 20, new Color(1f, 1f, 1f, 0.5f),
+                new Vector2(140, -110), 160, TextAnchor.MiddleLeft);
+            Badge(panel, "AllPriceIcon", new Vector2(300, -110), ShopCert);
+            RowLabel(panel, "AllPriceAmount", "0", 30, Color.white, new Vector2(400, -110), 180, TextAnchor.MiddleLeft);
 
-            Button buy = FlatBtn(panel, "BuyButton", "BUY", new Vector2(250, -230), new Vector2(280, 68), 26, false);
-            buy.GetComponent<Image>().color = TileBlue;
+            Button buy = FlatBtn(panel, "BuyButton", "PURCHASE", new Vector2(290, -230), new Vector2(420, 76), 28, false);
+            buy.GetComponent<Image>().color = new Color(0.72f, 0.82f, 0.16f);
+            buy.transform.Find("Text").GetComponent<Text>().color = TileInk;
 
-            Button close = FlatBtn(panel, "CloseButton", "✕", new Vector2(420, 210), new Vector2(60, 60), 26, false);
+            Button close = FlatBtn(panel, "CloseButton", "✕", new Vector2(540, 280), new Vector2(60, 60), 26, false);
             close.GetComponent<Image>().color = new Color(0.30f, 0.31f, 0.33f, 0.95f);
 
             panel.SetActive(false);
@@ -2379,6 +2706,16 @@ namespace Arknights.EditorTools {
             string path = UserDataDir + "/" + userName + ".asset";
             PlayerData data = ScriptableObject.CreateInstance<PlayerData>();
             data.Initialization(userName, password);
+
+            // Initialization 只发 0/1/2 三种, 不给凭证, 于是凭证交易所里什么都买不起:
+            // HasItem 返回false, 购买数量就一直卡在0
+            // Initialization hands out items 0, 1 and 2 only. Without certificates every purchase in
+            // the certificate exchange is refused - HasItem fails and the buy amount stays pinned at
+            // zero - so the screen looks functional but nothing can actually be bought.
+            data.AddItem(6, 400);   // base certificate
+            data.AddItem(7, 200);   // senior certificate
+            data.AddItem(8, 20);    // purchase certificate
+
             AssetDatabase.DeleteAsset(path);
             AssetDatabase.CreateAsset(data, path);
         }
