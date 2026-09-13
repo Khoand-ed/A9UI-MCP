@@ -107,6 +107,7 @@ namespace Arknights.EditorTools {
             BuildLoginUIPrefab();
             BuildCommonDialogPrefab();
             BuildHomeUIPrefab();
+            BuildSettingUIPrefab();
             BuildCharPrefab();
             BuildMonsterPrefab();
             BuildCharPlacePrefab();
@@ -813,6 +814,273 @@ namespace Arknights.EditorTools {
             return new Injection { name = name, value = value };
         }
 
+        // ------------------------------------------------------------------ SettingUI
+
+        /// <summary>
+        /// 设置界面(占位) / The settings screen, as a placeholder.
+        ///
+        /// SettingUI.Init() 会无条件访问它的每一个字段, 所以哪个都不能少 - 少一个就是空引用。
+        /// 异形屏那一行按要求藏起来了: slider还在, 只是整行 SetActive(false), Init() 照样读得到它。
+        ///
+        /// Init() dereferences every one of its fields the first time the screen is shown, so all of
+        /// them have to exist or it throws before anything renders. The notch row is hidden rather
+        /// than omitted for exactly that reason - the Slider is still there and still wired, its row
+        /// is just inactive, which Init() does not mind.
+        ///
+        /// 声音那一页是真的能用的: Toggle和Slider直接接在 GameSettings 和 SoundManager.UpdateData 上。
+        /// The sound page genuinely works - its toggles and sliders are the ones Init() binds to
+        /// GameSettings, and each change calls SoundManager.UpdateData(). The numeric readouts beside
+        /// the sliders are static text: showing a live value would need a field or a script, and this
+        /// screen is meant to be replaced.
+        /// </summary>
+        private static void BuildSettingUIPrefab() {
+            GameObject root = NewUIRoot("SettingUI");
+            SettingUI ui = root.AddComponent<SettingUI>();
+
+            GameObject blurGo = Rect(root, "blur", Stretch);
+            Image blur = blurGo.AddComponent<Image>();
+            blur.color = new Color(0.05f, 0.05f, 0.06f, 0.55f);
+            blur.material = PlaceholderMaterial();
+            ui.blur = blur;
+
+            // ---- 顶栏 / top bar
+            GameObject topBar = Rect(root, "TopBar", r => {
+                r.anchorMin = new Vector2(0, 1);
+                r.anchorMax = new Vector2(1, 1);
+                r.pivot = new Vector2(0.5f, 1);
+                r.sizeDelta = new Vector2(0, 110);
+            });
+            topBar.AddComponent<Image>().color = new Color(0.96f, 0.96f, 0.97f, 0.98f);
+
+            Button back = FlatBtn(topBar, "back", "‹", new Vector2(-810, 0), new Vector2(170, 66), 46, false);
+            back.GetComponent<Image>().color = new Color(1f, 1f, 1f, 0.95f);
+            back.transform.Find("Text").GetComponent<Text>().color = TileInk;
+            WireHide(back, ui, "SettingUI");
+
+            // 图标和标题必须错开: RowLabel是左对齐的, 文字从框的左边缘起, 会直接压在图标上
+            // The icon and the title have to be spaced apart deliberately - RowLabel is left-aligned,
+            // so its text starts at the box's left edge, not at its centre.
+            Disc(topBar, "GearRim", new Vector2(-620, 0), 40, TileInk);
+            Disc(topBar, "GearBore", new Vector2(-620, 0), 15, new Color(0.96f, 0.96f, 0.97f));
+            RowLabel(topBar, "Title", "SETTINGS", 34, TileInk, new Vector2(-400, 0), 320, TextAnchor.MiddleLeft);
+
+            // ---- 主体 / body
+            GameObject body = Rect(root, "Body", r => {
+                r.anchorMin = new Vector2(0, 0);
+                r.anchorMax = new Vector2(1, 1);
+                r.offsetMin = new Vector2(0, 0);
+                r.offsetMax = new Vector2(0, -110);
+            });
+            body.AddComponent<Image>().color = new Color(0.93f, 0.94f, 0.95f, 0.95f);
+
+            GameObject rail = Rect(body, "TabRail", r => {
+                r.anchorMin = new Vector2(0, 0);
+                r.anchorMax = new Vector2(0, 1);
+                r.pivot = new Vector2(0, 0.5f);
+                r.sizeDelta = new Vector2(330, 0);
+            });
+            rail.AddComponent<Image>().color = new Color(0.85f, 0.86f, 0.88f, 0.96f);
+
+            GameObject gamePage = Rect(body, "GamePage", Stretch);
+            GameObject soundPage = Rect(body, "SoundPage", Stretch);
+
+            ToggleGroup tabs = body.AddComponent<ToggleGroup>();
+            TabToggle(rail, "GameTab", "GAME", new Vector2(0, 300), tabs, gamePage, true);
+            TabToggle(rail, "SoundTab", "SOUND", new Vector2(0, 190), tabs, soundPage, false);
+
+            // ---- 游戏页 / game page
+            ui.game_keep_speed = SettingRow(gamePage, "game_keep_speed", "2x SPEED HOLD",
+                "Every action stays at double speed once enabled", 300);
+            ui.game_performance = SettingRow(gamePage, "game_performance", "PERFORMANCE",
+                "Turning this off raises the frame rate, but costs battery and heat", 190);
+
+            // 异形屏这一行按要求隐藏, 但字段必须存在 / hidden by request; the field must still exist
+            GameObject notchRow = Rect(gamePage, "NotchRow", At(new Vector2(165, 80), new Vector2(1420, 90)));
+            RowLabel(notchRow, "NotchLabel", "NOTCH INSET", 28, TileInk,
+                new Vector2(-560, 0), 420, TextAnchor.MiddleLeft);
+            ui.game_profileScreen = MakeSlider(notchRow, "game_profileScreen", new Vector2(120, 0), 480);
+            notchRow.SetActive(false);
+
+            GameObject exitRow = Rect(gamePage, "ExitRow", At(new Vector2(165, -30), new Vector2(1420, 90)));
+            RowLabel(exitRow, "ExitLabel", "LOG OUT", 28, TileInk,
+                new Vector2(-560, 0), 420, TextAnchor.MiddleLeft);
+            ui.game_exit = FlatBtn(exitRow, "game_exit", "EXIT THIS ACCOUNT",
+                new Vector2(0, 0), new Vector2(300, 62), 22, false);
+            ui.game_exit.GetComponent<Image>().color = new Color(0.16f, 0.17f, 0.19f, 0.95f);
+
+            // ---- 声音页 / sound page
+            ui.sound_soundEffect = VolumeRow(soundPage, "sound_soundEffect", "SOUND EFFECTS", 300,
+                out ui.sound_soundEffect_value);
+            ui.sound_music = VolumeRow(soundPage, "sound_music", "MUSIC", 190, out ui.sound_music_value);
+            ui.sound_voice = VolumeRow(soundPage, "sound_voice", "VOICE", 80, out ui.sound_voice_value);
+
+            soundPage.SetActive(false);
+
+            SavePrefab(root, "SettingUI");
+        }
+
+        /// <summary>游戏页的一行: 标题 + 开关 + 说明 / a game-page row: label, switch, footnote.</summary>
+        private static Toggle SettingRow(GameObject page, string name, string caption, string note, float y) {
+            GameObject row = Rect(page, name + "Row", At(new Vector2(165, y), new Vector2(1420, 90)));
+            RowLabel(row, "Label", caption, 28, TileInk, new Vector2(-560, 0), 420, TextAnchor.MiddleLeft);
+            Toggle toggle = Pill(row, name, new Vector2(-160, 0));
+            RowLabel(row, "Note", "*" + note, 19, new Color(0.42f, 0.43f, 0.45f),
+                new Vector2(330, 0), 720, TextAnchor.MiddleLeft);
+            return toggle;
+        }
+
+        /// <summary>声音页的一行: 标题 + 开关 + 滑杆 + 数值 / label, switch, slider, readout.</summary>
+        private static Toggle VolumeRow(GameObject page, string name, string caption, float y, out Slider slider) {
+            GameObject row = Rect(page, name + "Row", At(new Vector2(165, y), new Vector2(1420, 90)));
+            RowLabel(row, "Label", caption, 28, TileInk, new Vector2(-560, 0), 420, TextAnchor.MiddleLeft);
+            Toggle toggle = Pill(row, name, new Vector2(-160, 0));
+            slider = MakeSlider(row, name + "_value", new Vector2(280, 0), 480);
+            RowLabel(row, "Readout", "100", 26, TileInk, new Vector2(600, 0), 120, TextAnchor.MiddleRight);
+            return toggle;
+        }
+
+        /// <summary>
+        /// 参考图里的滑动开关 / the sliding switch from the reference.
+        ///
+        /// 这里不给 Toggle 设 graphic, 显隐全交给 PillSwitch:
+        /// Toggle 只会对 graphic 本身淡入淡出, 挂在它下面的子物体不受影响, 关掉时还是看得见。
+        /// 滑块和两个标签因此都做成平级的兄弟节点。
+        ///
+        /// toggle.graphic is deliberately left null and PillSwitch owns the visuals. Toggle only
+        /// cross-fades that one Graphic, never its children, so a nested colour block and caption
+        /// stay visible in the off state. Keeping the knob and both labels as flat siblings avoids
+        /// that entirely - and gives the knob something to slide along.
+        /// </summary>
+        private static Toggle Pill(GameObject parent, string name, Vector2 pos) {
+            const float travel = 45f;
+            Vector2 size = new Vector2(180, 56);
+
+            GameObject go = Rect(parent, name, At(pos, size));
+            Toggle toggle = go.AddComponent<Toggle>();
+
+            GameObject track = Rect(go, "Track", Stretch);
+            Image trackImage = track.AddComponent<Image>();
+            trackImage.color = new Color(0.86f, 0.87f, 0.89f, 0.98f);
+
+            GameObject knob = Rect(go, "Knob", At(new Vector2(-travel, 0), new Vector2(90, 56)));
+            Image knobImage = knob.AddComponent<Image>();
+            knobImage.color = TileBlue;
+            knobImage.raycastTarget = false;
+
+            // 标签压在滑块上, 谁在下面谁就是亮的 / the captions ride over the knob; the lit one is
+            // whichever the knob is currently sitting under
+            Text onText = RowLabel(go, "OnText", "ON", 22, Color.white,
+                new Vector2(-travel, 0), 90, TextAnchor.MiddleCenter);
+            Text offText = RowLabel(go, "OffText", "OFF", 22, Color.white,
+                new Vector2(travel, 0), 90, TextAnchor.MiddleCenter);
+
+            toggle.targetGraphic = trackImage;
+            toggle.graphic = null;
+            toggle.isOn = true;
+
+            PillSwitch pill = go.AddComponent<PillSwitch>();
+            pill.knob = (RectTransform)knob.transform;
+            pill.knobImage = knobImage;
+            pill.onLabel = onText;
+            pill.offLabel = offText;
+            pill.onColor = TileBlue;
+            pill.offColor = new Color(0.44f, 0.45f, 0.47f);
+            pill.travel = travel;
+            return toggle;
+        }
+
+        private static void TabToggle(GameObject rail, string name, string caption, Vector2 pos,
+                                      ToggleGroup group, GameObject page, bool on) {
+            Vector2 size = new Vector2(250, 96);
+            GameObject go = Rect(rail, name, At(pos, size));
+            Toggle toggle = go.AddComponent<Toggle>();
+
+            GameObject background = Rect(go, "Background", Stretch);
+            Image backgroundImage = background.AddComponent<Image>();
+            backgroundImage.color = new Color(0.78f, 0.79f, 0.81f, 0.9f);
+
+            GameObject selected = Rect(go, "Selected", Stretch);
+            Image selectedImage = selected.AddComponent<Image>();
+            selectedImage.color = new Color(1f, 1f, 1f, 0.98f);
+
+            RowLabel(go, "Label", caption, 28, TileInk, new Vector2(34, 0), 170, TextAnchor.MiddleLeft);
+            Disc(go, "Dot", new Vector2(-82, 0), 26, TileInk);
+
+            toggle.targetGraphic = backgroundImage;
+            toggle.graphic = selectedImage;
+            toggle.group = group;
+            toggle.isOn = on;
+
+            // 动态监听: 页面的显隐直接跟着开关的值走, 不需要写脚本
+            // A dynamic persistent listener, so the page's active state follows the toggle with no
+            // script involved. AddBoolPersistentListener would nail the argument to a constant.
+            UnityEventTools.AddPersistentListener(toggle.onValueChanged, page.SetActive);
+        }
+
+        /// <summary>
+        /// 音量滑杆 / a volume slider. GameSettings 存的是int 0-100, 所以整数步进
+        /// GameSettings stores these as an int and divides by 100f, so the slider is whole-numbered
+        /// over 0-100 rather than the default normalised range.
+        /// </summary>
+        private static Slider MakeSlider(GameObject parent, string name, Vector2 pos, float width) {
+            GameObject go = Rect(parent, name, At(pos, new Vector2(width, 34)));
+            Slider slider = go.AddComponent<Slider>();
+
+            GameObject track = Rect(go, "Background", r => {
+                r.anchorMin = new Vector2(0, 0.5f);
+                r.anchorMax = new Vector2(1, 0.5f);
+                r.pivot = new Vector2(0.5f, 0.5f);
+                r.sizeDelta = new Vector2(0, 4);
+            });
+            track.AddComponent<Image>().color = new Color(0.24f, 0.25f, 0.27f, 0.85f);
+
+            GameObject fillArea = Rect(go, "Fill Area", r => {
+                r.anchorMin = new Vector2(0, 0.5f);
+                r.anchorMax = new Vector2(1, 0.5f);
+                r.pivot = new Vector2(0.5f, 0.5f);
+                r.sizeDelta = new Vector2(-18, 6);
+            });
+            GameObject fill = Rect(fillArea, "Fill", r => {
+                r.anchorMin = Vector2.zero;
+                r.anchorMax = new Vector2(0, 1);
+                r.sizeDelta = new Vector2(18, 0);
+            });
+            fill.AddComponent<Image>().color = TileBlue;
+
+            GameObject handleArea = Rect(go, "Handle Slide Area", r => {
+                r.anchorMin = Vector2.zero;
+                r.anchorMax = Vector2.one;
+                r.sizeDelta = new Vector2(-18, 0);
+            });
+            GameObject handle = Rect(handleArea, "Handle", r => {
+                r.anchorMin = new Vector2(0, 0);
+                r.anchorMax = new Vector2(0, 1);
+                r.sizeDelta = new Vector2(18, 0);
+            });
+            Image handleImage = handle.AddComponent<Image>();
+            handleImage.sprite = Builtin("Knob");
+            handleImage.color = new Color(0.16f, 0.17f, 0.19f);
+
+            slider.fillRect = (RectTransform)fill.transform;
+            slider.handleRect = (RectTransform)handle.transform;
+            slider.targetGraphic = handleImage;
+            slider.direction = Slider.Direction.LeftToRight;
+            slider.minValue = 0;
+            slider.maxValue = 100;
+            slider.wholeNumbers = true;
+            slider.value = 100;
+            return slider;
+        }
+
+        private static Text RowLabel(GameObject parent, string name, string text, int size, Color color,
+                                     Vector2 pos, float width, TextAnchor align) {
+            Text t = Label(parent, name, text, size, color, pos);
+            RectTransform r = (RectTransform)t.transform;
+            r.sizeDelta = new Vector2(width, 46);
+            t.alignment = align;
+            return t;
+        }
+
         // ------------------------------------------------------------------ HomeUI parts
 
         private static System.Action<RectTransform> At(Vector2 centre, Vector2 size) {
@@ -967,8 +1235,13 @@ namespace Arknights.EditorTools {
         /// The target prefabs do not exist yet, so a click logs one missing-prefab error from
         /// UIManager.Load and returns null. Nothing throws.
         /// </summary>
-        private static void Wire(Button button, RuaUI ui, string screen) {
+        private static void Wire(Button button, UIBase ui, string screen) {
             UnityEventTools.AddStringPersistentListener(button.onClick, ui.Show, screen);
+        }
+
+        /// <summary>返回键接 UIBase.Hide(string) / a back button points at UIBase.Hide(string).</summary>
+        private static void WireHide(Button button, UIBase ui, string screen) {
+            UnityEventTools.AddStringPersistentListener(button.onClick, ui.Hide, screen);
         }
 
         /// <summary>磁贴上的橙色细条 / the orange rule the reference draws on some tiles.</summary>
