@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.IO;
+using Data.Char;
 using Data.Item;
 using Data.Player;
 using Spine.Unity;
@@ -117,6 +118,10 @@ namespace Arknights.EditorTools {
             BuildHomeUIPrefab();
             BuildSettingUIPrefab();
             BuildShopUIPrefab();
+            BuildCharSprites();
+            BuildCharMeta("AMIYA", "Amiya", "阿米娅", 5, CharProfession.SHU_SHI);
+            BuildCharUIPrefab();
+            BuildCharInfoUIPrefab();
             BuildCharPrefab();
             BuildMonsterPrefab();
             BuildCharPlacePrefab();
@@ -165,7 +170,16 @@ namespace Arknights.EditorTools {
             scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
             scaler.referenceResolution = new Vector2(1920, 1080);
             scaler.screenMatchMode = CanvasScaler.ScreenMatchMode.MatchWidthOrHeight;
-            scaler.matchWidthOrHeight = 0f; // UIManager 以宽适配 / project adapts on width
+            // 必须按高适配, 才能和 UIManager.GetCanvasSize() 对上:
+            // 那边算的是 canvasSize.x = canvasSize.y * 宽/高, 也就是把高当成固定的1080。
+            // 之前设成按宽适配, 于是 CharInfoUI 按 GetCanvasSize() 撑出来的面板比可视区还宽, 两边被切掉。
+            // Height-matched on purpose, to agree with UIManager.GetCanvasSize(), which computes
+            // canvasSize.x = canvasSize.y * width / height - i.e. it treats 1080 as the fixed axis.
+            // With width-matching the two disagreed, and CharInfoUI sized its panels from
+            // GetCanvasSize() to 2160 against a 1920 viewport, so both edges were clipped.
+            // At 16:9 the two modes are identical; wider displays now gain side margin instead of
+            // losing the top and bottom of every screen.
+            scaler.matchWidthOrHeight = 1f;
             canvasGo.AddComponent<GraphicRaycaster>();
 
             // 没有EventSystem按钮和输入框点不动 / Without an EventSystem nothing is clickable.
@@ -821,6 +835,765 @@ namespace Arknights.EditorTools {
 
         private static Injection Inject(string name, Object value) {
             return new Injection { name = name, value = value };
+        }
+
+        // ------------------------------------------------------------------ CharUI (Lua driven)
+
+        private const string MetaCharDir = ResourcesRoot + "/Meta/Char";
+        private const string SpriteCharDir = ResourcesRoot + "/Sprite/Char";
+
+        private static readonly Color[] RarityColors = {
+            new Color(0.62f, 0.64f, 0.67f), // 1
+            new Color(0.55f, 0.76f, 0.36f), // 2
+            new Color(0.33f, 0.62f, 0.86f), // 3
+            new Color(0.63f, 0.50f, 0.82f), // 4
+            new Color(0.95f, 0.80f, 0.25f), // 5
+            new Color(0.96f, 0.55f, 0.20f)  // 6
+        };
+
+        /// <summary>
+        /// CharManager 用名字当字典键, 所以每张图的文件名都是硬约定
+        /// CharManager keys its dictionaries by sprite name, so these filenames are the contract:
+        ///   CardGround/{rarity}_1..4 and {rarity}_star   (the _1..4 set is filtered by ^\d_.+)
+        ///   ProfessionSmall/{CharProfession}             (keyed by the enum's ToString)
+        ///   Elite/card_1, card_2
+        /// 找不到就是 KeyNotFoundException, 因为取的时候没做存在判断
+        /// A miss is a KeyNotFoundException rather than a null, because the getters index straight
+        /// into the dictionary without checking.
+        /// </summary>
+        private static void BuildCharSprites() {
+            for (int rarity = 1; rarity <= RarityColors.Length; rarity++) {
+                Color tint = RarityColors[rarity - 1];
+                CardGround(rarity + "_1", 64, 96, tint, 1f);
+                // _2.._4 是叠在底图上的装饰层, 占位阶段留空, 但名字必须在
+                // Layers 2-4 are decorative overlays on the real card art. They are blank here, but
+                // the names have to exist or setData throws on the first lookup.
+                CardGround(rarity + "_2", 8, 8, tint, 0f);
+                CardGround(rarity + "_3", 8, 8, tint, 0f);
+                CardGround(rarity + "_4", 8, 8, tint, 0f);
+                BuildStarRowSprite(rarity + "_star", rarity);
+            }
+
+            // 八个职业各给一个能分辨的多边形 / a distinguishable polygon per profession
+            ProfessionGlyph(CharProfession.XIAN_FENG, 3, 90f);
+            ProfessionGlyph(CharProfession.JIN_WEI, 4, 45f);
+            ProfessionGlyph(CharProfession.JU_JI, 5, 90f);
+            ProfessionGlyph(CharProfession.ZHONG_ZHUANG, 6, 0f);
+            ProfessionGlyph(CharProfession.YI_LIAO, 8, 22.5f);
+            ProfessionGlyph(CharProfession.FU_ZHU, 4, 0f);
+            ProfessionGlyph(CharProfession.SHU_SHI, 3, -90f);
+            ProfessionGlyph(CharProfession.TE_ZHONG, 5, -90f);
+
+            EliteBadge("card_1", 1);
+            EliteBadge("card_2", 2);
+
+            // 详情页要的另外四套 / the four sets CharInfoUI indexes
+            //   Star/info_N        GetStarImage("info_" + rarity)
+            //   Profession/{enum}  GetProfessionImage - 大图, 和卡片上的小图分开
+            //   Elite/big_N        GetCharEliteImage("big_" + elite) - 精英0也要, 干员初始就是0
+            //   Camp/{enum}        GetCampImage(camp.ToString())
+            // big_0 matters: a fresh operator is elite 0, so that key is hit immediately.
+            for (int rarity = 1; rarity <= RarityColors.Length; rarity++) {
+                StarRow(SpriteCharDir + "/Star", "info_" + rarity, rarity);
+            }
+            for (int elite = 0; elite <= 2; elite++) {
+                EliteBadgeAt(SpriteCharDir + "/Elite", "big_" + elite, elite);
+            }
+            foreach (CharProfession profession in System.Enum.GetValues(typeof(CharProfession))) {
+                PolygonSprite(SpriteCharDir + "/Profession", profession.ToString(), 96,
+                    3 + ((int)profession % 6), (int)profession * 17f);
+            }
+            int campIndex = 0;
+            foreach (CharCamp camp in System.Enum.GetValues(typeof(CharCamp))) {
+                PolygonSprite(SpriteCharDir + "/Camp", camp.ToString(), 96,
+                    3 + (campIndex % 6), campIndex * 23f);
+                campIndex++;
+            }
+        }
+
+        private static void CardGround(string name, int width, int height, Color tint, float alpha) {
+            Color[] pixels = new Color[width * height];
+            for (int y = 0; y < height; y++) {
+                // 竖向渐变, 底部更暗, 和参考图的卡面一样 / vertical fade, darker at the foot
+                float t = y / (float)(height - 1);
+                Color row = Color.Lerp(tint * 0.25f, tint, t);
+                for (int x = 0; x < width; x++) {
+                    pixels[y * width + x] = new Color(row.r, row.g, row.b, alpha);
+                }
+            }
+            ImportSpriteAt(SpriteCharDir + "/CardGround", name, pixels, width, height, Vector4.zero);
+        }
+
+        /// <summary>一排五角星, 星数就是稀有度 / a row of five-pointed stars, one per rarity point.</summary>
+        private static void BuildStarRowSprite(string name, int count) {
+            StarRow(SpriteCharDir + "/CardGround", name, count);
+        }
+
+        private static void StarRow(string dir, string name, int count) {
+            const int cell = 32;
+            int width = cell * count;
+            Color[] pixels = new Color[width * cell];
+
+            for (int star = 0; star < count; star++) {
+                Vector2 centre = new Vector2(star * cell + cell * 0.5f, cell * 0.5f);
+                for (int y = 0; y < cell; y++) {
+                    for (int x = 0; x < cell; x++) {
+                        Vector2 point = new Vector2(star * cell + x + 0.5f, y + 0.5f);
+                        if (!InsideStar(point - centre, cell * 0.46f, cell * 0.20f)) continue;
+                        pixels[y * width + (star * cell + x)] = Color.white;
+                    }
+                }
+            }
+            ImportSpriteAt(dir, name, pixels, width, cell, Vector4.zero);
+        }
+
+        /// <summary>
+        /// 十个顶点的多边形判定 / point-in-polygon against the star's ten alternating vertices.
+        /// 用极角直接算比逐边求交简单 / comparing against the interpolated radius at this angle is
+        /// simpler than a full edge-crossing test and exact enough at this size.
+        /// </summary>
+        private static bool InsideStar(Vector2 offset, float outer, float inner) {
+            float angle = Mathf.Atan2(offset.y, offset.x);
+            float spike = Mathf.PI * 2f / 5f;
+            // 把角度折到一个尖角内 / fold the angle into a single spike, then into half of it
+            float local = Mathf.Repeat(angle + Mathf.PI * 0.5f, spike);
+            float half = spike * 0.5f;
+            float t = Mathf.Abs(local - half) / half;          // 1 at the tip, 0 at the valley
+            return offset.magnitude <= Mathf.Lerp(inner, outer, t);
+        }
+
+        private static void ProfessionGlyph(CharProfession profession, int sides, float rotation) {
+            PolygonSprite(SpriteCharDir + "/ProfessionSmall", profession.ToString(), 48, sides, rotation);
+        }
+
+        private static void PolygonSprite(string dir, string name, int size, int sides, float rotation) {
+            Color[] pixels = new Color[size * size];
+            float half = size * 0.5f;
+            float radius = half * 0.88f;
+            float offsetAngle = rotation * Mathf.Deg2Rad;
+
+            for (int y = 0; y < size; y++) {
+                for (int x = 0; x < size; x++) {
+                    Vector2 offset = new Vector2(x + 0.5f - half, y + 0.5f - half);
+                    float angle = Mathf.Atan2(offset.y, offset.x) - offsetAngle;
+                    // 正n边形: 极角折进一个扇区后, 边到中心的距离是 cos 关系
+                    // Regular n-gon: fold the angle into one sector, where the edge sits at
+                    // radius * cos(sector/2) / cos(foldedAngle).
+                    float sector = Mathf.PI * 2f / sides;
+                    float folded = Mathf.Repeat(angle, sector) - sector * 0.5f;
+                    float edge = radius * Mathf.Cos(sector * 0.5f) / Mathf.Cos(folded);
+                    if (offset.magnitude <= edge) pixels[y * size + x] = Color.white;
+                }
+            }
+            ImportSpriteAt(dir, name, pixels, size, size, Vector4.zero);
+        }
+
+        private static void EliteBadge(string name, int level) {
+            EliteBadgeAt(SpriteCharDir + "/Elite", name, level);
+        }
+
+        private static void EliteBadgeAt(string dir, string name, int level) {
+            const int size = 48;
+            Color[] pixels = new Color[size * size];
+            for (int y = 0; y < size; y++) {
+                for (int x = 0; x < size; x++) {
+                    // level 道横杠 / one chevron bar per elite level
+                    int band = y * (level * 2 + 1) / size;
+                    if (band % 2 == 1) pixels[y * size + x] = Color.white;
+                }
+            }
+            ImportSpriteAt(dir, name, pixels, size, size, Vector4.zero);
+        }
+
+        /// <summary>
+        /// 造一个干员元数据 / authors one CharMeta asset.
+        /// 字段都是 private [SerializeField], 所以只能走 SerializedObject 写
+        /// Every field is private and serialized, so SerializedObject is the only way in.
+        /// atkRange 必须非空: OnEnable 会遍历它, 而 CreateInstance 就会触发一次 OnEnable
+        /// atkRange must end up non-null - OnEnable walks it, and CreateInstance fires OnEnable.
+        /// </summary>
+        private static void BuildCharMeta(string id, string english, string chinese, int rarity,
+                                          CharProfession profession) {
+            EnsureFolder(MetaCharDir);
+            CharMeta meta = ScriptableObject.CreateInstance<CharMeta>();
+
+            SerializedObject so = new SerializedObject(meta);
+            so.FindProperty("chineseName").stringValue = chinese;
+            so.FindProperty("englishName").stringValue = english;
+            so.FindProperty("rarity").intValue = rarity;
+            so.FindProperty("profession").enumValueIndex = (int)profession;
+            so.FindProperty("charPosition").enumValueIndex = (int)CharPosition.YUAN_CHENG;
+            so.FindProperty("camp").enumValueIndex = (int)CharCamp.LDD;
+            so.FindProperty("feature").stringValue = "Placeholder operator - see SETUP.md.";
+
+            SerializedProperty range = so.FindProperty("atkRange");
+            range.arraySize = 1;
+            range.GetArrayElementAtIndex(0).stringValue = "ooo";
+
+            // 精英/等级属性各三档(0/1/2), GetAttribute 会按精英阶级索引
+            // Three entries each, because GetAttribute indexes these by elite rank.
+            SerializedProperty elite = so.FindProperty("eliteAttributes");
+            SerializedProperty perLevel = so.FindProperty("levelAttributes");
+            elite.arraySize = 3;
+            perLevel.arraySize = 3;
+
+            // GetAttribute 是 levelAttributes[elite] * level + eliteAttributes[elite], 干员起始等级是0,
+            // 所以基础值必须放在 eliteAttributes[0], 否则详情页全是0
+            // GetAttribute computes levelAttributes[elite] * level + eliteAttributes[elite], and a
+            // new operator starts at level 0 - so the base numbers have to live in eliteAttributes[0]
+            // or every stat on the detail screen reads zero.
+            for (int i = 0; i < 3; i++) {
+                float scale = 1f + i * 0.55f;
+                SetAttribute(elite, i, 1060f * scale, 264f * scale, 83f * scale, 0f, 1.3f, 70, 18, 1);
+                SetAttribute(perLevel, i, 24f, 5.2f, 1.6f, 0f, 0f, 0, 0, 0);
+            }
+
+            so.FindProperty("tags").arraySize = 0;
+            SerializedProperty talent = so.FindProperty("talent");
+            talent.arraySize = 1;
+            talent.GetArrayElementAtIndex(0).stringValue = "First Aid Kit";
+            so.ApplyModifiedPropertiesWithoutUndo();
+
+            string path = MetaCharDir + "/" + id + ".asset";
+            AssetDatabase.DeleteAsset(path);
+            AssetDatabase.CreateAsset(meta, path);
+        }
+
+        private static void SetAttribute(SerializedProperty array, int index, float health, float atk,
+                                         float def, float resistance, float atkSpeed,
+                                         int respawn, int cost, int block) {
+            SerializedProperty entry = array.GetArrayElementAtIndex(index);
+            entry.FindPropertyRelative("maxHealth").floatValue = health;
+            entry.FindPropertyRelative("atk").floatValue = atk;
+            entry.FindPropertyRelative("def").floatValue = def;
+            entry.FindPropertyRelative("magicResistance").floatValue = resistance;
+            entry.FindPropertyRelative("atkSpeed").floatValue = atkSpeed;
+            entry.FindPropertyRelative("respawnTime").intValue = respawn;
+            entry.FindPropertyRelative("cost").intValue = cost;
+            entry.FindPropertyRelative("block").intValue = block;
+        }
+
+        /// <summary>
+        /// 干员列表 / the operator roster. Lua驱动, injections 的名字对应 CharUI.lua.txt 里的全局变量
+        /// Lua driven: the injection names are the globals CharUI.lua.txt reads, and the card's child
+        /// names are what getCharCard resolves with transform:Find.
+        ///
+        /// 卡片的位置是 GridLayoutGroup 排的 - Lua 只调 SetSiblingIndex, 不设坐标
+        /// The grid does the positioning. Lua only ever calls SetSiblingIndex to reorder cards; it
+        /// never assigns a position, so without a layout group every card would sit on top of the
+        /// first one.
+        /// </summary>
+        private static void BuildCharUIPrefab() {
+            GameObject root = NewUIRoot("CharUI");
+            RuaUI ui = root.AddComponent<RuaUI>();
+
+            Rect(root, "BackGround", Stretch).AddComponent<Image>().color = HomeInk;
+
+            GameObject topBar = Rect(root, "TopBar", r => {
+                r.anchorMin = new Vector2(0, 1);
+                r.anchorMax = new Vector2(1, 1);
+                r.pivot = new Vector2(0.5f, 1);
+                r.sizeDelta = new Vector2(0, 110);
+            });
+            topBar.AddComponent<Image>().color = new Color(0.10f, 0.11f, 0.12f, 0.96f);
+
+            Button back = FlatBtn(topBar, "back", "‹", new Vector2(-830, 0), new Vector2(170, 68), 46, false);
+            back.GetComponent<Image>().color = new Color(0.30f, 0.31f, 0.33f, 0.9f);
+            WireHide(back, ui, "CharUI");
+
+            // 两个排序开关是互斥的, 所以放同一个 ToggleGroup / mutually exclusive, hence one group
+            ToggleGroup sortGroup = topBar.AddComponent<ToggleGroup>();
+            Toggle togLevel = SortToggle(topBar, "tog_level", "LEVEL", new Vector2(560, 0), sortGroup, true);
+            Toggle togRarity = SortToggle(topBar, "tog_rarity", "RARITY", new Vector2(740, 0), sortGroup, false);
+            FlatBtn(topBar, "SortOrder", "≡", new Vector2(880, 0), new Vector2(90, 68), 32, false);
+
+            // 横向滚动: ScrollView/Viewport(Mask)/Content, 卡片模板必须在 Content 里
+            // Lua 是 Instantiate(cardPrefab, cardPrefab.parent), 所以模板的父级就是滚动内容
+            // Horizontal scroll. The template has to live inside Content because the Lua spawns with
+            // Instantiate(cardPrefab, cardPrefab.parent) - the template's parent IS the container.
+            GameObject scrollView = Rect(root, "ScrollView", r => {
+                r.anchorMin = new Vector2(0, 0);
+                r.anchorMax = new Vector2(1, 1);
+                r.offsetMin = new Vector2(40, 60);
+                r.offsetMax = new Vector2(-40, -130);
+            });
+            ScrollRect scroll = scrollView.AddComponent<ScrollRect>();
+
+            GameObject viewport = Rect(scrollView, "Viewport", Stretch);
+            viewport.AddComponent<Image>().color = new Color(1f, 1f, 1f, 0.02f);
+            viewport.AddComponent<Mask>().showMaskGraphic = true;
+
+            GameObject content = Rect(viewport, "Content", r => {
+                r.anchorMin = new Vector2(0, 1);
+                r.anchorMax = new Vector2(0, 1);
+                r.pivot = new Vector2(0, 1);
+                r.sizeDelta = new Vector2(0, 856);
+            });
+
+            // 固定两行往右长 / two fixed rows, growing rightward
+            GridLayoutGroup layout = content.AddComponent<GridLayoutGroup>();
+            layout.cellSize = new Vector2(200, 420);
+            layout.spacing = new Vector2(16, 16);
+            layout.constraint = GridLayoutGroup.Constraint.FixedRowCount;
+            layout.constraintCount = 2;
+            layout.startAxis = GridLayoutGroup.Axis.Vertical;
+            layout.childAlignment = TextAnchor.UpperLeft;
+
+            // 只让宽度跟着内容走, 高度是两行固定的
+            // Only the width tracks the content; the height is the two fixed rows.
+            ContentSizeFitter fitter = content.AddComponent<ContentSizeFitter>();
+            fitter.horizontalFit = ContentSizeFitter.FitMode.PreferredSize;
+            fitter.verticalFit = ContentSizeFitter.FitMode.Unconstrained;
+
+            scroll.content = (RectTransform)content.transform;
+            scroll.viewport = (RectTransform)viewport.transform;
+            scroll.horizontal = true;
+            scroll.vertical = false;
+            scroll.movementType = ScrollRect.MovementType.Elastic;
+            scroll.scrollSensitivity = 30f;
+
+            GameObject card = BuildCharCard(content);
+            card.SetActive(false);
+
+            ui.injections = new[] {
+                Inject("cardPrefab", (RectTransform)card.transform),
+                Inject("tog_level", togLevel),
+                Inject("tog_rarity", togRarity),
+            };
+
+            SavePrefab(root, "CharUI");
+        }
+
+        private static Toggle SortToggle(GameObject parent, string name, string caption, Vector2 pos,
+                                         ToggleGroup group, bool on) {
+            GameObject go = Rect(parent, name, At(pos, new Vector2(170, 68)));
+            Toggle toggle = go.AddComponent<Toggle>();
+
+            GameObject background = Rect(go, "Background", Stretch);
+            Image backgroundImage = background.AddComponent<Image>();
+            backgroundImage.color = new Color(1f, 1f, 1f, 0.06f);
+
+            GameObject selected = Rect(go, "Selected", Stretch);
+            Image selectedImage = selected.AddComponent<Image>();
+            selectedImage.color = new Color(0.25f, 0.55f, 0.85f, 0.35f);
+
+            RowLabel(go, "Label", caption, 24, Color.white, Vector2.zero, 170, TextAnchor.MiddleCenter);
+
+            toggle.targetGraphic = backgroundImage;
+            toggle.graphic = selectedImage;
+            toggle.group = group;
+            toggle.isOn = on;
+            return toggle;
+        }
+
+        /// <summary>
+        /// 卡片模板 / the card template. 子物体名字全部由 getCharCard 硬编码
+        /// Every child name here is hard-coded in getCharCard, and the root needs a Button because
+        /// the Lua attaches its click handler with transform:GetComponent("Button").
+        ///
+        /// y缩放从0开始, 让 ScaleY 补间把它长出来 / authored at y-scale 0 so the tween grows it in
+        /// </summary>
+        private static GameObject BuildCharCard(GameObject grid) {
+            GameObject card = Rect(grid, "cardPrefab", r => { });
+            card.transform.localScale = new Vector3(1, 0, 1);
+            Image cardImage = card.AddComponent<Image>();
+            cardImage.color = new Color(0.13f, 0.14f, 0.16f);
+            card.AddComponent<Button>().targetGraphic = cardImage;
+
+            // 四层卡面底图 / the four card-ground layers, filled by CharManager at runtime
+            CardLayer(card, "img_rarity_1");
+            CardLayer(card, "img_rarity_2");
+            CardLayer(card, "img_rarity_3");
+            CardLayer(card, "img_rarity_4");
+
+            // 立绘: 没有美术资源时 sprite 是 null, Image 就渲染成一块纯色
+            // The portrait. With no art the sprite resolves to null and the Image simply draws a
+            // flat colour, which is the placeholder.
+            GameObject portrait = Rect(card, "img_char_card", r => {
+                r.anchorMin = new Vector2(0, 0.18f);
+                r.anchorMax = new Vector2(1, 1);
+                r.offsetMin = Vector2.zero;
+                r.offsetMax = Vector2.zero;
+            });
+            Image portraitImage = portrait.AddComponent<Image>();
+            portraitImage.color = new Color(0.42f, 0.44f, 0.48f);
+            portraitImage.raycastTarget = false;
+
+            GameObject profession = Rect(card, "img_profession", r => {
+                r.anchorMin = r.anchorMax = new Vector2(0, 1);
+                r.pivot = new Vector2(0, 1);
+                r.sizeDelta = new Vector2(40, 40);
+                r.anchoredPosition = new Vector2(8, -8);
+            });
+            Image professionImage = profession.AddComponent<Image>();
+            professionImage.color = Color.white;
+            professionImage.raycastTarget = false;
+
+            GameObject stars = Rect(card, "img_rarity_star", r => {
+                r.anchorMin = r.anchorMax = new Vector2(1, 1);
+                r.pivot = new Vector2(1, 1);
+                r.sizeDelta = new Vector2(120, 24);
+                r.anchoredPosition = new Vector2(-8, -12);
+            });
+            Image starsImage = stars.AddComponent<Image>();
+            starsImage.color = new Color(0.98f, 0.82f, 0.25f);
+            starsImage.raycastTarget = false;
+
+            GameObject elite = Rect(card, "img_elite", r => {
+                r.anchorMin = r.anchorMax = new Vector2(0, 0.5f);
+                r.pivot = new Vector2(0, 0.5f);
+                r.sizeDelta = new Vector2(44, 44);
+                r.anchoredPosition = new Vector2(10, 10);
+            });
+            Image eliteImage = elite.AddComponent<Image>();
+            eliteImage.color = Color.white;
+            eliteImage.raycastTarget = false;
+            elite.SetActive(false);   // Lua 按精英阶级开关 / Lua toggles this by elite rank
+
+            // 等级环 / the level ring, matching the reference's circular badge
+            GameObject expGround = Rect(card, "img_exp_ground", r => {
+                r.anchorMin = r.anchorMax = new Vector2(0, 0);
+                r.pivot = new Vector2(0, 0);
+                r.sizeDelta = new Vector2(74, 74);
+                r.anchoredPosition = new Vector2(8, 18);
+            });
+            Image expGroundImage = expGround.AddComponent<Image>();
+            expGroundImage.sprite = levelRing;
+            expGroundImage.color = new Color(1f, 1f, 1f, 0.18f);
+            expGroundImage.raycastTarget = false;
+
+            GameObject expFill = Rect(expGround, "img_exp_percentage", Stretch);
+            Image expImage = expFill.AddComponent<Image>();
+            expImage.sprite = levelRing;
+            expImage.color = new Color(0.98f, 0.82f, 0.25f);
+            expImage.type = Image.Type.Filled;
+            expImage.fillMethod = Image.FillMethod.Radial360;
+            expImage.fillOrigin = (int)Image.Origin360.Top;
+            expImage.raycastTarget = false;
+
+            // txt_level 必须是卡片的直接子物体: Lua 用 transform:Find("txt_level"), 不带路径的
+            // Find 只看直接子级, 塞进 img_exp_ground 里就返回 nil
+            // txt_level has to be a direct child. The Lua calls transform:Find("txt_level"), and a
+            // bare name only searches direct children - nesting it under the ring returns nil, and
+            // the Lua then indexes that nil straight away.
+            Text level = RowLabel(card, "txt_level", "1", 30, Color.white,
+                new Vector2(45, 49), 74, TextAnchor.MiddleCenter);
+            RectTransform levelRect = (RectTransform)level.transform;
+            levelRect.anchorMin = levelRect.anchorMax = Vector2.zero;
+            levelRect.pivot = new Vector2(0.5f, 0.5f);
+            levelRect.anchoredPosition = new Vector2(45, 49);
+
+            Text lvCaption = RowLabel(card, "LvCaption", "LV", 13, new Color(1f, 1f, 1f, 0.7f),
+                new Vector2(45, 72), 74, TextAnchor.MiddleCenter);
+            RectTransform lvRect = (RectTransform)lvCaption.transform;
+            lvRect.anchorMin = lvRect.anchorMax = Vector2.zero;
+            lvRect.pivot = new Vector2(0.5f, 0.5f);
+            lvRect.anchoredPosition = new Vector2(45, 72);
+
+            GameObject nameGround = Rect(card, "NameGround", r => {
+                r.anchorMin = new Vector2(0, 0);
+                r.anchorMax = new Vector2(1, 0);
+                r.pivot = new Vector2(0.5f, 0);
+                r.sizeDelta = new Vector2(0, 56);
+            });
+            nameGround.AddComponent<Image>().color = new Color(0.06f, 0.06f, 0.07f, 0.92f);
+
+            // 卡片宽200, 名字要贴右边又不能出界, 所以框跟卡片同宽再留点内边距
+            // The card is 200 wide; right-aligning inside a box that is itself offset pushed the
+            // name past the edge, so the box spans the card and only the padding moves it in.
+            RowLabel(card, "txt_name", "Operator", 22, Color.white, new Vector2(-10, -172), 180,
+                TextAnchor.MiddleRight);
+            return card;
+        }
+
+        /// <summary>
+        /// 干员详情 / the operator detail screen.
+        ///
+        /// CharInfoUI 会把 prefab 克隆三份左右滑动, 所以 prefab 的父级就是 ScrollRect 的 content,
+        /// 三块面板并排, horizontalNormalizedPosition 的 0/0.5/1 正好对应左中右
+        /// Init clones `prefab` three times into prefab.parent and swipes between them, so that
+        /// parent is the ScrollRect's content: three canvas-wide panels side by side, which is what
+        /// makes horizontalNormalizedPosition 0 / 0.5 / 1 land on left, centre and right.
+        ///
+        /// 面板里每一个名字都是 CharPrefab 用路径字符串找的, 错一个就是空引用
+        /// Every name inside the panel is resolved by path string in CharPrefab's constructor and
+        /// init(), so a single wrong name is a null reference before the screen draws.
+        /// </summary>
+        private static void BuildCharInfoUIPrefab() {
+            GameObject root = NewUIRoot("CharInfoUI");
+            CharInfoUI ui = root.AddComponent<CharInfoUI>();
+            ScrollRect scroll = root.AddComponent<ScrollRect>();
+
+            Rect(root, "BackGround", Stretch).AddComponent<Image>().color = new Color(0.09f, 0.09f, 0.10f);
+
+            GameObject viewport = Rect(root, "Viewport", Stretch);
+            viewport.AddComponent<Image>().color = new Color(1f, 1f, 1f, 0.01f);
+            viewport.AddComponent<Mask>().showMaskGraphic = true;
+
+            GameObject content = Rect(viewport, "Content", r => {
+                r.anchorMin = new Vector2(0, 0);
+                r.anchorMax = new Vector2(0, 1);
+                r.pivot = new Vector2(0, 0.5f);
+                r.sizeDelta = new Vector2(0, 0);
+            });
+            HorizontalLayoutGroup row = content.AddComponent<HorizontalLayoutGroup>();
+            // 面板宽度是 Init 里按画布尺寸设的, 所以这里绝不能让布局去控制子物体尺寸
+            // Init assigns each panel's size from the canvas, so the layout group must not control
+            // child size or it would immediately overwrite that.
+            row.childControlWidth = false;
+            row.childControlHeight = false;
+            row.childForceExpandWidth = false;
+            row.childForceExpandHeight = false;
+
+            ContentSizeFitter fitter = content.AddComponent<ContentSizeFitter>();
+            fitter.horizontalFit = ContentSizeFitter.FitMode.PreferredSize;
+            fitter.verticalFit = ContentSizeFitter.FitMode.Unconstrained;
+
+            scroll.content = (RectTransform)content.transform;
+            scroll.viewport = (RectTransform)viewport.transform;
+            scroll.horizontal = true;
+            scroll.vertical = false;
+            scroll.movementType = ScrollRect.MovementType.Unrestricted;
+
+            ui.prefab = (RectTransform)BuildCharPanel(content).transform;
+
+            // 返回键挂在根节点上, 不进滚动内容:
+            // Init 会把 prefab 克隆三份, 放面板里就会变成三个跟着左右滑的按钮; 而且它在 ScrollRect
+            // 里面, 从按钮上起手的拖拽会被当成滚动而不是点击
+            // The back button sits on the root rather than inside the scroll content. Init clones
+            // the panel three times, so putting it in the card would give three buttons sliding with
+            // the carousel - and inside a ScrollRect a drag begun on the button scrolls instead of
+            // clicking. Created after Viewport so it draws over the panels, and before
+            // professionHelp so that overlay still covers it.
+            Button back = BackBtn(root, "back");
+            ((RectTransform)back.transform).anchoredPosition = new Vector2(48, -48);
+            WireHide(back, ui, "CharInfoUI");
+
+            // 职业说明浮层 / the profession help overlay
+            GameObject help = Rect(root, "professionHelp", Stretch);
+            Image helpImage = help.AddComponent<Image>();
+            helpImage.color = new Color(0.04f, 0.04f, 0.05f, 0.88f);
+            help.AddComponent<CanvasGroup>();
+            help.AddComponent<Button>().targetGraphic = helpImage;
+            RowLabel(help, "HelpText", "Profession details go here.\nTap anywhere to close.", 30,
+                Color.white, Vector2.zero, 900, TextAnchor.MiddleCenter);
+            help.SetActive(false);
+            ui.professionHelp = help.transform;
+
+            SavePrefab(root, "CharInfoUI");
+        }
+
+        private static GameObject BuildCharPanel(GameObject content) {
+            GameObject panel = Rect(content, "prefab", At(Vector2.zero, new Vector2(1920, 1080)));
+            panel.AddComponent<CanvasGroup>();
+
+            // 立绘和阵营标, 都在面板根下 / portrait and faction mark, both at the panel root
+            GameObject art = Rect(panel, "img_char", At(new Vector2(60, 0), new Vector2(820, 1000)));
+            Image artImage = art.AddComponent<Image>();
+            artImage.color = new Color(0.30f, 0.31f, 0.34f);
+            artImage.raycastTarget = false;
+
+            // 阵营标放在返回键右边的同一条顶栏上:
+            // 压在返回键上不行, 挪到它下面又会盖住属性栏第一行, 所以往右让开
+            // The faction mark sits beside the back button on the same top strip. Under the button
+            // it covered the first stat row, and on top of it the two collided outright - so it
+            // moves sideways instead, which is the only direction that is actually free.
+            GameObject camp = Rect(panel, "img_camp", r => {
+                r.anchorMin = r.anchorMax = new Vector2(0, 1);
+                r.pivot = new Vector2(0, 1);
+                r.sizeDelta = new Vector2(150, 150);
+                r.anchoredPosition = new Vector2(232, -26);
+            });
+            Image campImage = camp.AddComponent<Image>();
+            campImage.color = Color.white;
+            campImage.raycastTarget = false;
+
+            GameObject info = Rect(panel, "CharInfoPanel", Stretch);
+
+            // 三根柱子都贴着面板边缘锚定, 不用中心偏移:
+            // 面板宽度是 Init 按 GetCanvasSize() 给的, 而那个宽度跟着画面宽高比变(这里是2160不是1920),
+            // 所以任何按中心算的固定偏移在别的分辨率下都会跑到屏幕外
+            // The three columns anchor to the panel's own edges rather than sitting at fixed offsets
+            // from its centre. Init sizes each panel from GetCanvasSize(), which scales with the
+            // display aspect - it came out 2160 wide here, not 1920 - so centre-relative offsets
+            // drift off-screen as soon as the aspect changes.
+
+            // ---- 左中: 属性 / MiddleLeftPanel: the stat block
+            GameObject stats = Rect(info, "MiddleLeftPanel", r => {
+                r.anchorMin = r.anchorMax = new Vector2(0, 0.5f);
+                r.pivot = new Vector2(0, 0.5f);
+                r.sizeDelta = new Vector2(520, 420);
+                r.anchoredPosition = new Vector2(150, 120);
+            });
+            BarStat(stats, "Health", "HP", 150);
+            BarStat(stats, "Atk", "ATK", 96);
+            BarStat(stats, "Def", "DEF", 42);
+            BarStat(stats, "MagicResistance", "RES", -12);
+            PlainStat(stats, "RespawnTime", "REDEPLOY", 270, -66);
+            PlainStat(stats, "Cost", "DP COST", 270, -112);
+            PlainStat(stats, "Block", "BLOCK", 270, -158);
+            PlainStat(stats, "AtkSpeed", "ATK SPD", 270, -204);
+
+            GameObject trust = Rect(stats, "Trust", At(new Vector2(0, -260), new Vector2(520, 48)));
+            RowLabel(trust, "Caption", "TRUST", 20, new Color(1f, 1f, 1f, 0.55f),
+                new Vector2(-190, 0), 140, TextAnchor.MiddleLeft);
+            GameObject trustGround = Rect(trust, "img_ground", At(new Vector2(60, 0), new Vector2(300, 8)));
+            trustGround.AddComponent<Image>().color = new Color(1f, 1f, 1f, 0.15f);
+            GameObject trustFill = Rect(trust, "img_trust_percentage", At(new Vector2(60, 0), new Vector2(300, 8)));
+            Image trustImage = trustFill.AddComponent<Image>();
+            trustImage.color = new Color(0.33f, 0.72f, 0.95f);
+            trustImage.type = Image.Type.Filled;
+            trustImage.fillMethod = Image.FillMethod.Horizontal;
+            RowLabel(trust, "txt_trust_percentage", "0%", 22, Color.white,
+                new Vector2(230, 0), 100, TextAnchor.MiddleRight);
+
+            // ---- 左下: 名字/职业/位置/标签 / LowerLeftPanel
+            GameObject lower = Rect(info, "LowerLeftPanel", r => {
+                r.anchorMin = r.anchorMax = new Vector2(0, 0);
+                r.pivot = new Vector2(0, 0);
+                r.sizeDelta = new Vector2(520, 330);
+                r.anchoredPosition = new Vector2(150, 60);
+            });
+            GameObject rarity = Rect(lower, "img_rarity", At(new Vector2(-150, 130), new Vector2(220, 30)));
+            Image rarityImage = rarity.AddComponent<Image>();
+            rarityImage.color = new Color(0.98f, 0.82f, 0.25f);
+            rarityImage.raycastTarget = false;
+
+            RowLabel(lower, "txt_english_name", "Operator", 34, new Color(1f, 1f, 1f, 0.75f),
+                new Vector2(-110, 76), 300, TextAnchor.MiddleLeft);
+            RowLabel(lower, "txt_chinese_name", "干员", 62, Color.white,
+                new Vector2(-80, 6), 360, TextAnchor.MiddleLeft);
+
+            GameObject professionButton = Rect(lower, "img_profession",
+                At(new Vector2(-200, -100), new Vector2(110, 110)));
+            Image professionImage = professionButton.AddComponent<Image>();
+            professionImage.color = Color.white;
+            professionButton.AddComponent<Button>().targetGraphic = professionImage;
+
+            GameObject positionGround = Rect(lower, "img_position_ground",
+                At(new Vector2(20, -72), new Vector2(280, 46)));
+            positionGround.AddComponent<Image>().color = new Color(1f, 1f, 1f, 0.14f);
+            RowLabel(positionGround, "txt_position", "Ranged", 24, Color.white,
+                Vector2.zero, 280, TextAnchor.MiddleCenter);
+
+            GameObject tagGround = Rect(lower, "img_tag_ground",
+                At(new Vector2(20, -128), new Vector2(280, 46)));
+            tagGround.AddComponent<Image>().color = new Color(1f, 1f, 1f, 0.14f);
+            RowLabel(tagGround, "txt_tag", "-", 22, Color.white,
+                Vector2.zero, 280, TextAnchor.MiddleCenter);
+
+            // ---- 右侧: 等级/精英/特性/天赋 / RightPanel
+            GameObject right = Rect(info, "RightPanel", r => {
+                r.anchorMin = r.anchorMax = new Vector2(1, 0.5f);
+                r.pivot = new Vector2(1, 0.5f);
+                r.sizeDelta = new Vector2(600, 940);
+                r.anchoredPosition = new Vector2(-60, 0);
+            });
+
+            GameObject levelBlock = Rect(right, "Level", At(new Vector2(0, 340), new Vector2(560, 180)));
+            Image levelImage = levelBlock.AddComponent<Image>();
+            levelImage.color = new Color(1f, 1f, 1f, 0.08f);
+            levelBlock.AddComponent<Button>().targetGraphic = levelImage;
+
+            RowLabel(levelBlock, "Caption", "LV", 22, new Color(1f, 1f, 1f, 0.6f),
+                new Vector2(-210, 48), 100, TextAnchor.MiddleLeft);
+            RowLabel(levelBlock, "txt_level", "1", 66, Color.white,
+                new Vector2(-150, -4), 180, TextAnchor.MiddleLeft);
+            RowLabel(levelBlock, "txt_max_level", "50", 26, new Color(1f, 1f, 1f, 0.55f),
+                new Vector2(-40, -52), 140, TextAnchor.MiddleLeft);
+
+            GameObject expBox = Rect(levelBlock, "Image", At(new Vector2(140, 34), new Vector2(260, 52)));
+            expBox.AddComponent<Image>().color = new Color(0f, 0f, 0f, 0.35f);
+            RowLabel(expBox, "txt_exp", "0/0", 24, Color.white, Vector2.zero, 250, TextAnchor.MiddleCenter);
+
+            GameObject expGround = Rect(levelBlock, "img_exp_ground",
+                At(new Vector2(140, -16), new Vector2(260, 10)));
+            expGround.AddComponent<Image>().color = new Color(1f, 1f, 1f, 0.15f);
+            GameObject expFill = Rect(expGround, "img_exp_percentage", Stretch);
+            Image expImage = expFill.AddComponent<Image>();
+            expImage.color = new Color(0.93f, 0.80f, 0.02f);
+            expImage.type = Image.Type.Filled;
+            expImage.fillMethod = Image.FillMethod.Horizontal;
+
+            GameObject eliteBlock = Rect(right, "Elite", At(new Vector2(-140, 180), new Vector2(270, 130)));
+            Image eliteBg = eliteBlock.AddComponent<Image>();
+            eliteBg.color = new Color(1f, 1f, 1f, 0.08f);
+            eliteBlock.AddComponent<Button>().targetGraphic = eliteBg;
+            RowLabel(eliteBlock, "Caption", "PROMOTION", 20, new Color(1f, 1f, 1f, 0.6f),
+                new Vector2(-60, 40), 200, TextAnchor.MiddleLeft);
+            GameObject eliteIcon = Rect(eliteBlock, "img_elite", At(new Vector2(40, -10), new Vector2(90, 90)));
+            Image eliteIconImage = eliteIcon.AddComponent<Image>();
+            eliteIconImage.color = Color.white;
+            eliteIconImage.raycastTarget = false;
+
+            // 小标题要抬到正文上面: RowLabel 是垂直居中的, 标题和正文都按中心排会压在一起
+            // The caption has to clear the body text. RowLabel centres vertically, so placing both
+            // near the block's middle overlaps them.
+            GameObject feature = Rect(right, "Feature", At(new Vector2(0, -30), new Vector2(560, 200)));
+            RowLabel(feature, "Caption", "TRAIT", 22, new Color(1f, 1f, 1f, 0.5f),
+                new Vector2(-200, 86), 200, TextAnchor.MiddleLeft);
+            Text featureText = RowLabel(feature, "txt_feature", "-", 26, Color.white,
+                new Vector2(0, -16), 540, TextAnchor.UpperLeft);
+            ((RectTransform)featureText.transform).sizeDelta = new Vector2(540, 120);
+
+            GameObject talent = Rect(right, "Talent", At(new Vector2(0, -290), new Vector2(560, 260)));
+            RowLabel(talent, "Caption", "TALENT", 22, new Color(1f, 1f, 1f, 0.5f),
+                new Vector2(-200, 112), 200, TextAnchor.MiddleLeft);
+
+            GameObject list = Rect(talent, "List", At(new Vector2(0, -20), new Vector2(560, 200)));
+            VerticalLayoutGroup listLayout = list.AddComponent<VerticalLayoutGroup>();
+            listLayout.childControlWidth = false;
+            listLayout.childControlHeight = false;
+            listLayout.childForceExpandWidth = false;
+            listLayout.childForceExpandHeight = false;
+            listLayout.spacing = 10f;
+            listLayout.childAlignment = TextAnchor.UpperCenter;
+
+            // 天赋条目模板: init() 会 Instantiate 它到同一个父级, 所以自己保持失活
+            // The talent row template. init() clones it into the same parent, so it stays inactive.
+            GameObject talentRow = Rect(list, "img_ground", At(Vector2.zero, new Vector2(520, 56)));
+            talentRow.AddComponent<Image>().color = new Color(1f, 1f, 1f, 0.12f);
+            RowLabel(talentRow, "txt_talent", "-", 24, Color.white, Vector2.zero, 500, TextAnchor.MiddleLeft);
+            talentRow.SetActive(false);
+
+            return panel;
+        }
+
+        /// <summary>带进度条的属性行 / a stat row with a fill bar behind it.</summary>
+        private static void BarStat(GameObject parent, string name, string caption, float y) {
+            GameObject row = Rect(parent, name, At(new Vector2(-130, y), new Vector2(260, 44)));
+            RowLabel(row, "Caption", caption, 20, new Color(1f, 1f, 1f, 0.55f),
+                new Vector2(-80, 0), 120, TextAnchor.MiddleLeft);
+            RowLabel(row, "txt_value", "0", 28, Color.white, new Vector2(60, 0), 120, TextAnchor.MiddleRight);
+
+            GameObject ground = Rect(row, "img_ground", r => {
+                r.anchorMin = new Vector2(0, 0);
+                r.anchorMax = new Vector2(1, 0);
+                r.pivot = new Vector2(0.5f, 0);
+                r.sizeDelta = new Vector2(0, 6);
+            });
+            ground.AddComponent<Image>().color = new Color(1f, 1f, 1f, 0.15f);
+
+            GameObject fill = Rect(ground, "img_value_percentage", Stretch);
+            Image fillImage = fill.AddComponent<Image>();
+            fillImage.color = new Color(0.95f, 0.95f, 0.96f);
+            fillImage.type = Image.Type.Filled;
+            fillImage.fillMethod = Image.FillMethod.Horizontal;
+        }
+
+        /// <summary>只有数值的属性行 / a stat row that is just a caption and a value.</summary>
+        private static void PlainStat(GameObject parent, string name, string caption, float x, float y) {
+            GameObject row = Rect(parent, name, At(new Vector2(x - 130, y), new Vector2(260, 40)));
+            RowLabel(row, "Caption", caption, 20, new Color(1f, 1f, 1f, 0.55f),
+                new Vector2(-70, 0), 140, TextAnchor.MiddleLeft);
+            RowLabel(row, "txt_value", "0", 26, Color.white, new Vector2(70, 0), 120, TextAnchor.MiddleRight);
+        }
+
+        private static void CardLayer(GameObject card, string name) {
+            GameObject layer = Rect(card, name, Stretch);
+            Image image = layer.AddComponent<Image>();
+            image.color = Color.white;
+            image.raycastTarget = false;
         }
 
         // ------------------------------------------------------------------ ShopUI
@@ -2263,11 +3036,16 @@ namespace Arknights.EditorTools {
         }
 
         private static Sprite ImportSprite(string name, Color[] pixels, int size, Vector4 border) {
-            Texture2D tex = new Texture2D(size, size, TextureFormat.RGBA32, false);
+            return ImportSpriteAt(UIPrefabDir, name, pixels, size, size, border);
+        }
+
+        private static Sprite ImportSpriteAt(string dir, string name, Color[] pixels, int width, int height, Vector4 border) {
+            Texture2D tex = new Texture2D(width, height, TextureFormat.RGBA32, false);
             tex.SetPixels(pixels);
             tex.Apply();
 
-            string assetPath = UIPrefabDir + "/" + name + ".png";
+            EnsureFolder(dir);
+            string assetPath = dir + "/" + name + ".png";
             File.WriteAllBytes(Path.Combine(Path.GetDirectoryName(Application.dataPath), assetPath),
                 tex.EncodeToPNG());
             Object.DestroyImmediate(tex);

@@ -59,30 +59,44 @@ function updateView()
 end
 
 ---根据transform返回一个卡片对象（由于Lua层感觉不好互相沟通 所以受限用这种方法
+---
+---GetComponent的字符串重载现在认全名: "Text"/"Button" 会返回nil, 必须写 "UnityEngine.UI.Text"。
+---更阴的是取不到也不报错 - nil存进table是合法的, 所以要等到后面真去索引它时才炸, 报的行号
+---离出问题的地方十万八千里。
+---
+---GetComponent's string overload only resolves fully qualified UI type names now: "Text" and
+---"Button" both come back nil. The nasty part is that a miss is silent - storing nil in a table is
+---perfectly legal Lua - so the failure surfaces much later at whichever line first indexes one of
+---these fields, pointing nowhere near the real cause.
 ---@param transform UnityEngine.Transform
 function getCharCard(transform)
-    transform:DOScaleY(3,0.3)
+    --DOScaleY是扩展方法, Lua取不到, 所以走RuaUI的包装
+    --终值由3改成1: 3会让卡片停在三倍高, 而这里要的是长出来的效果, 模板的y缩放是0
+    --DOScaleY is an extension method Lua cannot reach, so this goes through the RuaUI wrapper.
+    --The end value is 1 rather than the original 3: a target of 3 leaves every card parked at
+    --triple height, whereas the template is authored at y-scale 0 so that 1 grows it into place.
+    self:ScaleY(transform, 1, 0.3)
     local CharCard = {
         data,
         gameObject = transform.gameObject,
-        name = transform:Find("txt_name"):GetComponent("Text"),
-        level = transform:Find("txt_level"):GetComponent("Text"),
-        expPercentage = transform:Find("img_exp_ground/img_exp_percentage"):GetComponent("Image"),
-        charCard = transform:Find("img_char_card"):GetComponent("Image"),
-        rarity1 = transform:Find("img_rarity_1"):GetComponent("Image"),
-        rarity2 = transform:Find("img_rarity_2"):GetComponent("Image"),
-        rarity3 = transform:Find("img_rarity_3"):GetComponent("Image"),
-        rarity4 = transform:Find("img_rarity_4"):GetComponent("Image"),
-        rarityStar = transform:Find("img_rarity_star"):GetComponent("Image"),
-        profession = transform:Find("img_profession"):GetComponent("Image"),
-        eliteImage = transform:Find("img_elite"):GetComponent("Image")
+        name = transform:Find("txt_name"):GetComponent("UnityEngine.UI.Text"),
+        level = transform:Find("txt_level"):GetComponent("UnityEngine.UI.Text"),
+        expPercentage = transform:Find("img_exp_ground/img_exp_percentage"):GetComponent("UnityEngine.UI.Image"),
+        charCard = transform:Find("img_char_card"):GetComponent("UnityEngine.UI.Image"),
+        rarity1 = transform:Find("img_rarity_1"):GetComponent("UnityEngine.UI.Image"),
+        rarity2 = transform:Find("img_rarity_2"):GetComponent("UnityEngine.UI.Image"),
+        rarity3 = transform:Find("img_rarity_3"):GetComponent("UnityEngine.UI.Image"),
+        rarity4 = transform:Find("img_rarity_4"):GetComponent("UnityEngine.UI.Image"),
+        rarityStar = transform:Find("img_rarity_star"):GetComponent("UnityEngine.UI.Image"),
+        profession = transform:Find("img_profession"):GetComponent("UnityEngine.UI.Image"),
+        eliteImage = transform:Find("img_elite"):GetComponent("UnityEngine.UI.Image")
     }
     --设置data并更新数据
     function CharCard:setData(data)
         self.data = data
         local charMeta = self.data:GetCharMeta()
         local rarity = charMeta:GetRarity()
-        self.name.text = charMeta:GetChineseName()
+        self.name.text = charMeta:GetEnglishName()
         self.charCard.sprite = charMeta:GetCharImage()
         self.rarity1.sprite = CharManager:GetCardGroundImage(rarity .. "_1")
         self.rarity2.sprite = CharManager:GetCardGroundImage(rarity .. "_2")
@@ -106,7 +120,7 @@ function getCharCard(transform)
         self.gameObject:SetActive(boo)
     end
 
-    transform:GetComponent("Button").onClick:AddListener(function()
+    transform:GetComponent("UnityEngine.UI.Button").onClick:AddListener(function()
         --打开界面
         local list = {}-- 与C# string[] 对接
         local index

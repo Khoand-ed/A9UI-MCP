@@ -79,5 +79,16 @@ namespace UI {
 
         public void FadeOut(float duration, bool destroy = false) =>
             canvasGroup.DOFade(0, duration).OnComplete(() => BaseHide(destroy));
+
+        /// <summary>
+        /// DOScaleY 也是扩展方法, 同样要包一层 / DOScaleY is an extension method too, so it needs the
+        /// same wrapper. 目标由Lua传进来, 因为它缩放的是卡片而不是界面本身
+        /// The target is passed in because the caller scales a spawned card, not the screen itself.
+        /// </summary>
+        // 全限定名: 这个文件没有 using UnityEngine, 而加上去会让 Object 在 System 和 UnityEngine 之间歧义
+        // Fully qualified on purpose - this file has no using UnityEngine, and adding one would make
+        // Object ambiguous against System.
+        public void ScaleY(UnityEngine.Transform target, float value, float duration) =>
+            target.DOScaleY(value, duration);
     }
 }

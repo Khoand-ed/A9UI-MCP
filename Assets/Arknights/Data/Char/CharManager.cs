@@ -53,6 +53,10 @@ namespace Data.Char {
         // 加载LoadMeta数据
         private CharMeta LoadMeta(string id) {
             CharMeta meta = Asset.Load<CharMeta>(GameSettings.CHAR_META_PATH, id);
+            // 元数据缺失时不要直接空引用 - Asset.Load 已经报过缺了哪个资源了
+            // A missing meta used to NRE on the next line. Asset.Load has already reported exactly
+            // which asset is absent, so bail out instead of turning that into a stack trace.
+            if (meta == null) return null;
             meta.SetId(id);
             metaDictionary.Add(id, meta);
             return meta;

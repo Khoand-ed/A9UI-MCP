@@ -90,6 +90,10 @@ namespace Data.Char {
             //缺点：没有中心点 比如 oooo /n oxoo /n oooo x为中心点
             //优点：够用
             attackRange = new List<Vector3>();
+            //新建的资源还没填攻击范围, 而 OnEnable 在 CreateInstance 时就会跑一次
+            //A freshly created asset has no range yet, and OnEnable runs during CreateInstance -
+            //before any field can be assigned - so this has to tolerate a null array.
+            if (atkRange == null) return;
             for (int x = 0; x < atkRange.Length; x++) {
                 string str = atkRange[x];
                 for (int z = 0; z < str.Length; z++) {
